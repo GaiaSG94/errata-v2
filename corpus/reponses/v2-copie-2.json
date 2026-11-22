@@ -1,0 +1,18 @@
+{
+  "source": "corpus/demo/v2-copie-2.jpg",
+  "modele": "zai/glm-4.6v, ag/gemini-3.8-flash-high",
+  "enregistreLe": "2026-11-15T16:55:34.321Z",
+  "dominant": "E01",
+  "nbFautes": 2,
+  "revues": 0,
+  "durees": {
+    "extrait": 178765,
+    "classifie": 0,
+    "genere": 158119
+  },
+  "reponses": {
+    "analyse": "{\"annotations\":[{\"ligne\":\"∫ sin(2x) dx = (1/2) cos(2x) + c\",\"annotation\":\"(cos)' = -sin → -½ cos(2x)\",\"code\":\"E01\",\"confiance\":0.9,\"explication\":\"The antiderivative of sin(2x) should have a negative sign from the derivative of cos(2x).\",\"zone\":{\"x\":0.2,\"y\":0.3,\"largeur\":0.5,\"hauteur\":0.05}},{\"ligne\":\"∫ e^(-3x) dx = (1/3) e^(-3x) + c\",\"annotation\":\"same sign mistake\",\"code\":\"E01\",\"confiance\":0.85,\"explication\":\"The antiderivative of e^(-3x) requires adjusting the sign due to the exponent's derivative.\",\"zone\":{\"x\":0.2,\"y\":0.35,\"largeur\":0.5,\"hauteur\":0.05}}],\"copiePropre\":false}",
+    "exercice": "{\"enonce\":\"Find the indefinite integral: ∫ sin(5x) dx.\",\"indices\":[\"Check which trigonometric function differentiates to give +sin(x).\"],\"solution\":\"Since the derivative of cos(5x) is -5 sin(5x), integrating sin(5x) requires dividing by -5. Don't omit the minus sign: ∫ sin(5x) dx = -(1/5) cos(5x) + C.\",\"niveau\":\"Grade 12\"}",
+    "verdict": "{\"travailleLeBonType\":true,\"neDonneLaSolutionOrigine\":true,\"memeNiveau\":true,\"motifs\":[]}"
+  }
+}

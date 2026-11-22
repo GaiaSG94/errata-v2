@@ -1,0 +1,18 @@
+{
+  "source": "corpus/demo/v2-copie-1.jpg",
+  "modele": "zai/glm-4.6v, ag/gemini-3.8-flash-high",
+  "enregistreLe": "2026-11-15T15:58:38.382Z",
+  "dominant": "E01",
+  "nbFautes": 4,
+  "revues": 0,
+  "durees": {
+    "extrait": 131641,
+    "classifie": 1,
+    "genere": 95622
+  },
+  "reponses": {
+    "analyse": "{\"nomDetecte\":\"Jordan LEE\",\"annotations\":[{\"ligne\":\"f(x) = 4x² - 9 - x² - 1\",\"annotation\":\"circle + (a - b)² = a² - 2ab + b²\",\"code\":\"E03\",\"confiance\":0.95,\"explication\":\"The expansion of (2x - 3)² is missing the middle term.\",\"eleve\":\"4x² - 9\",\"zone\":{\"x\":0.28,\"y\":0.24,\"largeur\":0.6,\"hauteur\":0.05}},{\"ligne\":\"f(x) = 4x² - 9 - x² - 1\",\"annotation\":\"circle + and -(-1) = +1\",\"code\":\"E01\",\"confiance\":0.92,\"explication\":\"Subtracting -1 should yield +1 instead of -1.\",\"eleve\":\"- 1\",\"attendu\":\"+1\",\"zone\":{\"x\":0.42,\"y\":0.26,\"largeur\":0.36,\"hauteur\":0.05}},{\"ligne\":\"g'(x) = 6x e^{-x} + (3x² - 1) e^{-x}\",\"annotation\":\"circle + (e^{-x})' = -e^{-x} !\",\"code\":\"E01\",\"confiance\":0.82,\"explication\":\"The negative sign from the derivative of e^(-x) was omitted.\",\"eleve\":\"+\",\"zone\":{\"x\":0.35,\"y\":0.45,\"largeur\":0.56,\"hauteur\":0.06}},{\"ligne\":\"h(x) = -2x² - 6x - 2\",\"annotation\":\"circle + sign again!\",\"code\":\"E01\",\"confiance\":0.95,\"explication\":\"Multiplying -2 by -3x gives +6x, not -6x.\",\"eleve\":\"- 6x\",\"zone\":{\"x\":0.34,\"y\":0.76,\"largeur\":0.4,\"hauteur\":0.06}}],\"copiePropre\":false}",
+    "exercice": "{\"enonce\":\"Expand and simplify: -3(2x - 4) + 2(-x + 5)\",\"indices\":[\"Remember to distribute the negative signs carefully to each term inside the parentheses.\"],\"solution\":\"-3(2x - 4) = -6x + 12 and 2(-x + 5) = -2x + 10. Combining gives -8x + 22. The common error is forgetting that -3 × (-4) = +12, not -12.\",\"niveau\":\"Grade 10\"}",
+    "verdict": "{\"travailleLeBonType\":true,\"neDonneLaSolutionOrigine\":true,\"memeNiveau\":true,\"motifs\":[]}"
+  }
+}

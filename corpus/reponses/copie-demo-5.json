@@ -1,0 +1,18 @@
+{
+  "source": "corpus/demo/copie-demo-5.jpg",
+  "modele": "ag/gemini-4-carbon",
+  "enregistreLe": "2026-11-15T14:01:37.411Z",
+  "dominant": "E03",
+  "nbFautes": 4,
+  "revues": 0,
+  "durees": {
+    "extrait": 14111,
+    "classifie": 1,
+    "genere": 26003
+  },
+  "reponses": {
+    "analyse": "{\"annotations\":[{\"ligne\":\"A = a² + b²\",\"annotation\":\"il manque 2ab\",\"code\":\"E03\",\"confiance\":0.95,\"explication\":\"The double product 2ab is missing from the expansion of (a+b)².\",\"eleve\":\"a² + b²\",\"attendu\":\"a² + 2ab + b²\",\"zone\":{\"x\":0.1,\"y\":0.17,\"largeur\":0.75,\"hauteur\":0.12}},{\"ligne\":\"B = x² + 9\",\"annotation\":\"- 6x\",\"code\":\"E03\",\"confiance\":0.95,\"explication\":\"The double product -6x is missing from the expansion of (x-3)².\",\"eleve\":\"x² + 9\",\"attendu\":\"x² - 6x + 9\",\"zone\":{\"x\":0.1,\"y\":0.35,\"largeur\":0.75,\"hauteur\":0.12}},{\"ligne\":\"C = 4/10\",\"annotation\":\"même dénominateur\",\"code\":\"E04\",\"confiance\":0.95,\"explication\":\"Denominators were added instead of finding a common denominator.\",\"eleve\":\"4/10\",\"attendu\":\"9/12 + 2/12 = 11/12\",\"zone\":{\"x\":0.1,\"y\":0.51,\"largeur\":0.75,\"hauteur\":0.1}},{\"ligne\":\"D = 4x\",\"annotation\":\"le x² aussi\",\"code\":\"E06\",\"confiance\":0.95,\"explication\":\"The exponent applies to the whole factor (2x)², giving 4x², not 4x.\",\"eleve\":\"4x\",\"attendu\":\"4x²\",\"zone\":{\"x\":0.1,\"y\":0.68,\"largeur\":0.75,\"hauteur\":0.1}}],\"copiePropre\":false}",
+    "exercice": "{\"enonce\":\"Expand and simplify: (x + 5)²\",\"indices\":[\"A square of a sum has three terms, not two.\"],\"solution\":\"(x+5)² = x² + 2×x×5 + 5² = x² + 10x + 25. The key step: the double product 2×x×5 = 10x must not be forgotten.\",\"niveau\":\"Grade 10\"}",
+    "verdict": "{\"travailleLeBonType\":true,\"neDonneLaSolutionOrigine\":true,\"memeNiveau\":true,\"motifs\":[]}"
+  }
+}

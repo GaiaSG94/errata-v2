@@ -1,0 +1,18 @@
+{
+  "source": "corpus/demo/v2-copie-3.jpg",
+  "modele": "ag/gemini-3.8-flash-high, zai/glm-4.6v",
+  "enregistreLe": "2026-11-15T16:41:27.556Z",
+  "dominant": "E01",
+  "nbFautes": 2,
+  "revues": 0,
+  "durees": {
+    "extrait": 299586,
+    "classifie": 1,
+    "genere": 111336
+  },
+  "reponses": {
+    "analyse": "{\"nomDetecte\":\"Jordan LEE\",\"annotations\":[{\"ligne\":\"I = ∫ sin x dx = [cos x] = 0 - 1 = -1\",\"annotation\":\"circle around cos x, ∫ sin = -cos\",\"code\":\"E01\",\"confiance\":0.88,\"explication\":\"The antiderivative of sin(x) has a minus sign: -cos(x).\",\"eleve\":\"cos x\",\"attendu\":\"-cos\",\"zone\":{\"x\":0.41,\"y\":0.22,\"largeur\":0.51,\"hauteur\":0.07}},{\"ligne\":\"L = ∫ e^(-x) dx = [e^(-x)] = 1/2 - 1 = -1/2\",\"annotation\":\"circle around e^(-x), antiderivative of e^(-x) is -e^(-x)\",\"code\":\"E01\",\"confiance\":0.88,\"explication\":\"The antiderivative of e^(-x) includes a minus sign: -e^(-x).\",\"eleve\":\"e^(-x)\",\"attendu\":\"-e^(-x)\",\"zone\":{\"x\":0.4,\"y\":0.66,\"largeur\":0.52,\"hauteur\":0.07}}],\"copiePropre\":false}",
+    "exercice": "{\"enonce\":\"Calculate the exact value of the integral: $I = \\\\int_0^{\\\\pi/3} \\\\sin(x) \\\\, dx$.\",\"indices\":[\"Pay close attention to the sign: the derivative of $\\\\cos(x)$ is $-\\\\sin(x)$.\"],\"solution\":\"An antiderivative of $\\\\sin(x)$ is $-\\\\cos(x)$ (do not drop the minus sign). Thus, $I = [-\\\\cos(x)]_0^{\\\\pi/3} = -\\\\cos(\\\\pi/3) - (-\\\\cos(0)) = -\\\\frac{1}{2} + 1 = \\\\frac{1}{2}$.\",\"niveau\":\"Grade 12\"}",
+    "verdict": "{\"travailleLeBonType\":true,\"neDonneLaSolutionOrigine\":true,\"memeNiveau\":true,\"motifs\":[]}"
+  }
+}

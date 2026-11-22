@@ -1,0 +1,304 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens — "Stickers" direction (planches v6, E3): electric-blue page,
+ * a white sheet on top, heavy black condensed type, and stickers (thick black
+ * outline + hard shadow). Two colors still carry meaning, and no red: the copy
+ * is already marked in red by the teacher, we do not add shame to a marked page.
+ *   - amber : the diagnosis (the recurring error we found) ;
+ *   - green : progress (a type that is now mastered).
+ */
+@theme {
+  --color-fond: #ffffff;
+  --color-bleu: #2337f0;
+  --color-bleu-fonce: #1a2bd0;
+  --color-ambre: #f2a516;
+  --color-menthe: #43d18c;
+  --color-rose: #ff9fd4;
+  --color-surface: #ffffff;
+  --color-surface-2: #f4f5f4;
+  --color-bord: #e1e4e2;
+  --color-texte: #0d0d0d;
+  --color-muet: #555b58;
+  --color-faible: #8b918e;
+  --color-jaune: #b45309;
+  --color-jaune-doux: #fff7d6;
+  --color-vert: #15803d;
+  --color-vert-doux: #dcfce7;
+  --font-sans: Archivo, Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-lecture: Georgia, "Times New Roman", serif;
+  --font-etroite: "Archivo Narrow", Archivo, sans-serif;
+  --font-italique: Fraunces, Georgia, serif;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bleu);
+  color: var(--color-texte);
+  font-family: var(--font-sans);
+  /* RNF-06: body text never below 16px. */
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Visible focus everywhere: keyboard navigation is mandatory (RNF-06). */
+:focus-visible {
+  outline: 2px solid var(--color-texte);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Uppercase micro-label, borrowed from the sibling design system. */
+.etiquette {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-muet);
+}
+
+/* Tabular, tight numerals for counts and scores. */
+.chiffre {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.045em;
+  font-weight: 550;
+}
+
+/* Study prose (statement, correction): serif, like a textbook. */
+.lecture {
+  font-family: var(--font-lecture);
+  line-height: 1.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes pulse-doux {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.etape-en-cours {
+  animation: pulse-doux 1.4s ease-in-out infinite;
+}
+
+/* ---- Stickers direction ---------------------------------------------- */
+
+/* Titles: heavy, tight, uppercase. Utilities (text-3xl…) still set the size. */
+@layer base {
+  h1 {
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: -0.04em;
+    line-height: 0.92;
+  }
+  h2 {
+    letter-spacing: -0.02em;
+  }
+}
+
+/* The one serif word inside a heavy title ("into *moves*"). */
+.mot-italique {
+  font-family: var(--font-italique);
+  font-style: italic;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: -0.03em;
+  color: var(--color-bleu);
+}
+
+/* A sticker: thick black outline, hard offset shadow, condensed caps. */
+.sticker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-family: var(--font-etroite);
+  font-weight: 700;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--color-texte);
+  border: 3px solid var(--color-texte);
+  border-radius: 12px;
+  padding: 6px 12px;
+  box-shadow: 3px 3px 0 var(--color-texte);
+}
+.sticker-ambre { background: var(--color-ambre); }
+.sticker-menthe { background: var(--color-menthe); }
+.sticker-rose { background: var(--color-rose); }
+.sticker-blanc { background: #fff; }
+
+/* Hard shadow for cards and secondary buttons. */
+.ombre-dure {
+  box-shadow: 4px 4px 0 var(--color-texte);
+}
+
+@keyframes balance {
+  0%, 100% { rotate: var(--r, 0deg); }
+  50% { rotate: calc(var(--r, 0deg) + 3deg); }
+}
+.balance {
+  animation: balance 4s ease-in-out infinite;
+}
+
+.errata-home {
+  --errata-ink: var(--color-texte);
+  padding: 0 0 1.5rem;
+  color: white;
+  position: relative;
+}
+
+/* Trame de points : sur TOUTE la page (fixe, bord à bord). Aucun bleu pur,
+   même dans les marges. Deux couches : demi-teinte fine + gros points. */
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::before {
+  inset: -40px;
+  background-image: radial-gradient(rgb(255 255 255 / 0.42) 3.2px, transparent 3.4px);
+  background-size: 30px 30px;
+  transform: translate3d(calc(var(--px, 0px) * 0.35), calc(var(--py, 0px) * 0.35), 0);
+  transition: transform 900ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  -webkit-mask-image: radial-gradient(62% 56% at 26% 44%, transparent, black 78%);
+  mask-image: radial-gradient(62% 56% at 26% 44%, transparent, black 78%);
+}
+
+body::after {
+  inset: -80px;
+  background-image: radial-gradient(rgb(255 255 255 / 0.5) 7px, transparent 7.6px),
+    radial-gradient(rgb(242 165 22 / 0.6) 5.4px, transparent 6px);
+  background-size: 150px 150px, 190px 190px;
+  background-position: 24px 38px, 96px 118px;
+  transform: translate3d(var(--px, 0px), var(--py, 0px), 0);
+  transition: transform 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  -webkit-mask-image: radial-gradient(64% 58% at 30% 46%, transparent, black 80%);
+  mask-image: radial-gradient(64% 58% at 30% 46%, transparent, black 80%);
+}
+
+.errata-home > * {
+  position: relative;
+  z-index: 1;
+}
+
+.errata-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 0.88fr) minmax(0, 1.12fr);
+  align-items: center;
+  gap: 2rem;
+  min-height: calc(100dvh - 8rem);
+  padding: 1.5rem 0;
+}
+
+.errata-hero-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 40rem;
+  text-align: left;
+}
+
+.errata-hero-kicker {
+  margin: 0 0 0.75rem;
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.errata-hero h1 {
+  margin: 1rem 0 0;
+  color: white;
+  font-size: clamp(3rem, 6.2vw, 6.5rem);
+  text-shadow: 0.3rem 0.3rem 0 var(--color-texte);
+}
+
+.errata-hero .mot-italique {
+  color: var(--color-ambre);
+}
+
+.errata-hero-lede {
+  max-width: 34rem;
+  margin: 1.25rem 0 0;
+  color: rgb(255 255 255 / 0.92);
+  font-size: 1rem;
+}
+
+.errata-proof-stickers {
+  margin-top: 1.25rem;
+}
+
+.errata-proof-stickers .sticker {
+  font-size: 0.72rem;
+  box-shadow: 3px 3px 0 var(--color-texte);
+}
+
+.errata-home-lower {
+  display: grid;
+  gap: 0.8rem;
+  padding-top: 0.5rem;
+}
+
+.errata-home-lower > .rounded-xl {
+  background: var(--color-surface);
+}
+
+/* Écrans internes : une feuille de papier posée sur le bureau bleu. L'accueil
+   reste à même le bureau (son .errata-home est exclu). */
+main.errata-zone > :not(.errata-home) {
+  background: var(--color-fond);
+  border: 3px solid var(--color-texte);
+  border-radius: 1.25rem;
+  box-shadow: 8px 8px 0 var(--color-texte);
+  padding: 1.75rem;
+  color: var(--color-texte);
+}
+
+@media (max-width: 900px) {
+  .errata-hero {
+    grid-template-columns: 1fr;
+    min-height: auto;
+    text-align: center;
+  }
+
+  .errata-hero-copy {
+    margin: 0 auto;
+    text-align: center;
+  }
+
+  .errata-hero-lede {
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .errata-proof-stickers {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 620px) {
+  .errata-hero {
+    padding-top: 1.2rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .errata-ctas > *,
+  .errata-duo-onglet {
+    transition: none;
+  }
+}
+

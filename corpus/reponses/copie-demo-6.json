@@ -1,0 +1,18 @@
+{
+  "source": "corpus/demo/copie-demo-6.jpg",
+  "modele": "ag/gemini-4-carbon",
+  "enregistreLe": "2026-11-15T14:17:39.101Z",
+  "dominant": "E09",
+  "nbFautes": 3,
+  "revues": 0,
+  "durees": {
+    "extrait": 10476,
+    "classifie": 0,
+    "genere": 18374
+  },
+  "reponses": {
+    "analyse": "{\"annotations\":[{\"ligne\":\"A = 49\",\"annotation\":\"A = 50, arrondi au dizième\",\"code\":\"E09\",\"confiance\":0.9,\"explication\":\"12.5 × 4 equals 50 exactly; the student wrote 49 instead.\",\"eleve\":\"49\",\"attendu\":\"50\",\"zone\":{\"x\":0.1,\"y\":0.19,\"largeur\":0.25,\"hauteur\":0.05}},{\"ligne\":\"B = 3,2 m + 45 m\",\"annotation\":\"B = 3,65 m, unités !\",\"code\":\"E10\",\"confiance\":0.92,\"explication\":\"45 cm was not converted to metres; units are inconsistent in the result.\",\"eleve\":\"3,2 m + 45 m\",\"attendu\":\"3,65 m\",\"zone\":{\"x\":0.1,\"y\":0.37,\"largeur\":0.35,\"hauteur\":0.05}},{\"ligne\":\"C = 2x + 3\",\"annotation\":\"C = 2x + 6, le 3 aussi\",\"code\":\"E02\",\"confiance\":0.95,\"explication\":\"Only x was multiplied by 2; the constant 3 was not multiplied.\",\"eleve\":\"2x + 3\",\"attendu\":\"2x + 6\",\"zone\":{\"x\":0.1,\"y\":0.53,\"largeur\":0.25,\"hauteur\":0.05}}],\"copiePropre\":false}",
+    "exercice": "{\"enonce\":\"A right triangle has legs of length 5 cm and 7 cm. Calculate the exact length of the hypotenuse, then round your final answer to the nearest tenth of a centimetre.\",\"indices\":[\"Keep the square root symbol in your working until the very last step.\"],\"solution\":\"Hypotenuse = √(5² + 7²) = √74. Only at the end: √74 ≈ 8.6 cm. Rounding √25 ≈ 5 or √49 ≈ 7 mid-calculation would introduce errors before the final result.\",\"niveau\":\"Grade 10\"}",
+    "verdict": "{\"travailleLeBonType\":true,\"neDonneLaSolutionOrigine\":true,\"memeNiveau\":false,\"motifs\":[\"The original paper shows basic arithmetic/algebra; a Pythagorean theorem exercise is more advanced.\"]}"
+  }
+}

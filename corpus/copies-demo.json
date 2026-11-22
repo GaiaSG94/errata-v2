@@ -1,0 +1,221 @@
+{
+  "copies": [
+    {
+      "id": "copie-demo-1",
+      "eleve": "Léa M.",
+      "classe": "2nde 4",
+      "devoir": "Devoir n°3",
+      "titre": "Exercice 1 : développer et réduire",
+      "note": "11/20",
+      "types_attendus": ["E01", "E11"],
+      "resume": "le signe se perd au développement",
+      "lignes": [
+        { "type": "enonce", "texte": "A = -2(3x - 5)" },
+        { "type": "eleve", "texte": "A = -6x - 10" },
+        { "type": "corrige", "texte": "A = -6x + 10", "prof": "signe !" },
+        { "type": "enonce", "texte": "B = 4(x - 1) - 3(x + 2)" },
+        { "type": "eleve", "texte": "B = 4x - 4 - 3x + 6" },
+        { "type": "corrige", "texte": "B = 4x - 4 - 3x - 6", "prof": "-3 x +2 ?" },
+        { "type": "enonce", "texte": "C = 2x + 7" },
+        { "type": "eleve", "texte": "C = 2x + 3 + 4" },
+        { "type": "annotation", "texte": "Recopie : l'énoncé donnait 2x + 7." }
+      ]
+    },
+    {
+      "id": "copie-demo-2",
+      "eleve": "Léa M.",
+      "classe": "2nde 4",
+      "devoir": "Devoir n°4",
+      "titre": "Exercice 2 : développer et réduire",
+      "note": "13/20",
+      "types_attendus": ["E01", "E02"],
+      "resume": "le signe revient, avec une distributivité incomplète",
+      "lignes": [
+        { "type": "enonce", "texte": "D = 5 - 3(2x - 1)" },
+        { "type": "eleve", "texte": "D = 5 - 6x - 3" },
+        { "type": "corrige", "texte": "D = 5 - 6x + 3", "prof": "signe" },
+        { "type": "enonce", "texte": "E = 4(3x + 2)" },
+        { "type": "eleve", "texte": "E = 12x + 2" },
+        { "type": "corrige", "texte": "E = 12x + 8", "prof": "le 4 sur le 2 ?" },
+        { "type": "enonce", "texte": "F = 7x - 2(x - 3)" },
+        { "type": "eleve", "texte": "F = 7x - 2x - 3" },
+        { "type": "corrige", "texte": "F = 7x - 2x + 6", "prof": "signe" }
+      ]
+    },
+    {
+      "id": "copie-demo-3",
+      "eleve": "Léa M.",
+      "classe": "2nde 4",
+      "devoir": "Devoir n°5",
+      "titre": "Exercice 3 : puissances et racines",
+      "note": "15/20",
+      "types_attendus": ["E06", "E07"],
+      "resume": "puissances et racines : autre famille de fautes",
+      "lignes": [
+        { "type": "enonce", "texte": "G = (2x)³" },
+        { "type": "eleve", "texte": "G = 2x³" },
+        { "type": "corrige", "texte": "G = 8x³", "prof": "le 2 aussi" },
+        { "type": "enonce", "texte": "H = x⁵ × x²" },
+        { "type": "eleve", "texte": "H = x¹⁰" },
+        { "type": "corrige", "texte": "H = x⁷", "prof": "on additionne" },
+        { "type": "enonce", "texte": "I = √(9 + 16)" },
+        { "type": "eleve", "texte": "I = 3 + 4" },
+        { "type": "corrige", "texte": "I = √25 = 5", "prof": "non !" },
+        { "type": "enonce", "texte": "J = √50" },
+        { "type": "eleve", "texte": "J = 25√2" },
+        { "type": "corrige", "texte": "J = 5√2", "prof": "la racine de 25" }
+      ]
+    },
+    {
+      "id": "copie-demo-4",
+      "eleve": "Léa M.",
+      "classe": "2nde 4",
+      "devoir": "Contrôle n°1",
+      "titre": "Contrôle : développement et équations",
+      "note": "18/20",
+      "types_attendus": [],
+      "resume": "contrôle sans faute : « aucune erreur détectée »",
+      "lignes": [
+        { "type": "enonce", "texte": "A = -3(x - 4)" },
+        { "type": "eleve", "texte": "A = -3x + 12" },
+        { "type": "enonce", "texte": "B = (x + 2)²" },
+        { "type": "eleve", "texte": "B = x² + 4x + 4" },
+        { "type": "enonce", "texte": "C = 5(2x - 1)" },
+        { "type": "eleve", "texte": "C = 10x - 5" },
+        { "type": "enonce", "texte": "D : 2x + 5 = 3x - 4" },
+        { "type": "eleve", "texte": "D : x = 9" },
+        { "type": "annotation", "texte": "Très bon travail !" }
+      ]
+    },
+    {
+      "id": "copie-demo-5",
+      "eleve": "Noé B.",
+      "classe": "2nde 4",
+      "devoir": "Devoir n°3",
+      "titre": "Développement et fractions",
+      "note": "9/20",
+      "types_attendus": ["E03", "E04"],
+      "resume": "identités remarquables et fractions",
+      "lignes": [
+        { "type": "enonce", "texte": "A = (a + b)²" },
+        { "type": "eleve", "texte": "A = a² + b²" },
+        { "type": "corrige", "texte": "A = a² + 2ab + b²", "prof": "il manque 2ab" },
+        { "type": "enonce", "texte": "B = (x - 3)²" },
+        { "type": "eleve", "texte": "B = x² + 9" },
+        { "type": "corrige", "texte": "B = x² - 6x + 9", "prof": "- 6x" },
+        { "type": "enonce", "texte": "C = 3/4 + 1/6" },
+        { "type": "eleve", "texte": "C = 4/10" },
+        { "type": "corrige", "texte": "C = 9/12 + 2/12 = 11/12", "prof": "même dénominateur" },
+        { "type": "enonce", "texte": "D = (2x)²" },
+        { "type": "eleve", "texte": "D = 4x" },
+        { "type": "corrige", "texte": "D = 4x²", "prof": "le x² aussi" }
+      ]
+    },
+    {
+      "id": "copie-demo-6",
+      "eleve": "Inès D.",
+      "classe": "2nde 4",
+      "devoir": "Devoir n°2",
+      "titre": "Calculs décimaux et grandeurs",
+      "note": "12/20",
+      "types_attendus": ["E09", "E10", "E02"],
+      "resume": "arrondi, unités et distributivité",
+      "lignes": [
+        { "type": "enonce", "texte": "A = 12,5 × 4" },
+        { "type": "eleve", "texte": "A = 49" },
+        { "type": "corrige", "texte": "A = 50", "prof": "arrondi au dizième" },
+        { "type": "enonce", "texte": "B = 3,2 m + 45 cm" },
+        { "type": "eleve", "texte": "B = 3,2 m + 45 m" },
+        { "type": "corrige", "texte": "B = 3,65 m", "prof": "unités !" },
+        { "type": "enonce", "texte": "C = 2(x + 3)" },
+        { "type": "eleve", "texte": "C = 2x + 3" },
+        { "type": "corrige", "texte": "C = 2x + 6", "prof": "le 3 aussi" },
+        { "type": "enonce", "texte": "D = 7,8 × 100" },
+        { "type": "eleve", "texte": "D = 780" },
+        { "type": "annotation", "texte": "ok pour celle-là" }
+      ]
+    },
+    {
+      "id": "v2-copie-1",
+      "eleve": "Jordan L.",
+      "classe": "Grade 12 — B",
+      "devoir": "Test 3 · Oct 21",
+      "titre": "Algebra & derivatives",
+      "note": "9/20",
+      "types_attendus": ["E01", "E03"],
+      "resume": "the sign is lost in the expansion and in the derivative",
+      "lignes": [
+        { "type": "enonce", "texte": "f(x) = (2x - 3)^2 - (x + 1)(x - 1)" },
+        { "type": "eleve", "texte": "f(x) = 4x^2 - 9 - x^2 - 1" },
+        { "type": "corrige", "texte": "f(x) = 4x^2 - 12x + 9 - x^2 + 1", "prof": "(a-b)^2 = a^2-2ab+b^2 and -(-1)=+1" },
+        { "type": "enonce", "texte": "g(x) = (3x^2 - 1)e^(-x)" },
+        { "type": "eleve", "texte": "g'(x) = 6x e^(-x) + (3x^2 - 1)e^(-x)" },
+        { "type": "corrige", "texte": "g'(x) = 6x e^(-x) - (3x^2 - 1)e^(-x)", "prof": "(e^(-x))' = -e^(-x) !" },
+        { "type": "enonce", "texte": "h(x) = -2(x^2 - 3x + 1)" },
+        { "type": "eleve", "texte": "h(x) = -2x^2 - 6x - 2" },
+        { "type": "corrige", "texte": "h(x) = -2x^2 + 6x - 2", "prof": "sign again!" }
+      ]
+    },
+    {
+      "id": "v2-copie-2",
+      "eleve": "Jordan L.",
+      "classe": "Grade 12 — B",
+      "devoir": "Test 4 · Nov 2",
+      "titre": "Antiderivatives",
+      "note": "14/20",
+      "types_attendus": ["E01"],
+      "resume": "the same sign error, now on antiderivatives",
+      "lignes": [
+        { "type": "enonce", "texte": "Integral sin(2x) dx" },
+        { "type": "eleve", "texte": "= 1/2 cos(2x) + C" },
+        { "type": "corrige", "texte": "= -1/2 cos(2x) + C", "prof": "(cos)' = -sin" },
+        { "type": "enonce", "texte": "Integral e^(-3x) dx" },
+        { "type": "eleve", "texte": "= 1/3 e^(-3x) + C" },
+        { "type": "corrige", "texte": "= -1/3 e^(-3x) + C", "prof": "same sign mistake" },
+        { "type": "enonce", "texte": "Integral (x + 2)^2 dx" },
+        { "type": "eleve", "texte": "= x^3/3 + 2x^2 + 4x + C" },
+        { "type": "annotation", "texte": "4/4, well done" }
+      ]
+    },
+    {
+      "id": "v2-copie-3",
+      "eleve": "Jordan L.",
+      "classe": "Grade 12 — B",
+      "devoir": "Test 5 · Nov 12",
+      "titre": "Definite integrals",
+      "note": "10/20",
+      "types_attendus": ["E01"],
+      "resume": "expansions are right now; every lost point is still the sign",
+      "lignes": [
+        { "type": "enonce", "texte": "I = Integral(0, pi/2) sin x dx" },
+        { "type": "eleve", "texte": "= [cos x] = 0 - 1 = -1" },
+        { "type": "corrige", "texte": "= [-cos x] = 0 - (-1) = 1", "prof": "Integral sin = -cos; sin >= 0 here so I >= 0" },
+        { "type": "enonce", "texte": "J = Integral(1, 2) (x - 1/x^2) dx" },
+        { "type": "eleve", "texte": "J = 1" },
+        { "type": "annotation", "texte": "5/5, correct" },
+        { "type": "enonce", "texte": "L = Integral(0, ln 2) e^(-x) dx" },
+        { "type": "eleve", "texte": "= [e^(-x)] = 1/2 - 1 = -1/2" },
+        { "type": "corrige", "texte": "= [-e^(-x)] = 1 - 1/2 = 1/2", "prof": "antiderivative of e^(-x) is -e^(-x)" }
+      ]
+    },
+    {
+      "id": "v2-copie-4",
+      "eleve": "Jordan L.",
+      "classe": "Grade 12 — B",
+      "devoir": "Quiz · Nov 14",
+      "titre": "Integration",
+      "note": "20/20",
+      "types_attendus": [],
+      "resume": "no mistake left: every sign is right this time",
+      "lignes": [
+        { "type": "enonce", "texte": "Integral(0, 1) (2x + 1) dx = [x^2 + x] = 2" },
+        { "type": "annotation", "texte": "5/5" },
+        { "type": "enonce", "texte": "Integral(0, pi) sin x dx = [-cos x] = 1 - (-1) = 2" },
+        { "type": "annotation", "texte": "5/5" },
+        { "type": "enonce", "texte": "Integral(1, e) 1/x dx = [ln x] = 1" },
+        { "type": "annotation", "texte": "5/5" },
+        { "type": "annotation", "texte": "Excellent! Every sign is right this time." }
+      ]
+    }
+  ]
+}

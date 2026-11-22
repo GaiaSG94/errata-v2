@@ -1,0 +1,105 @@
+﻿name: couche0
+
+# Couche 0 anti-rÃ©gression. Deux contrÃ´les dÃ©terministes, quasi gratuits,
+# sans checkout :
+#   - scope     : tout fichier modifiÃ© est dÃ©clarÃ© dans `## Scope` du corps ;
+#   - forbidden : motifs interdits dans le diff + fichiers de garde gelÃ©s.
+# Le juge vient de `main`, jamais du head de la PR : une PR ne modifie pas
+# son propre garde. Re-armable : `gh workflow run couche0.yml -f pr=<n>`.
+# Le check est requis : il doit donc rendre son verdict aussi bien sur la PR
+# que sur le groupe de merge de la file native (`gh-readonly-queue/<base>/pr-<n>-<sha>`).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  # File de merge native : mÃªme contrÃ´le sur le commit temporaire du groupe.
+  # `merge_group` est l'Ã©vÃ©nement d'aujourd'hui ; le `push` sur
+  # `gh-readonly-queue/**` reste pour les file(s) construites en push.
+  merge_group:
+  push:
+    branches:
+      - 'gh-readonly-queue/**'
+      # PAS de `mergify/merge-queue/**` (retirÃ© le 31/10) : la PR que la file
+      # ouvre sur sa branche de lot dÃ©clenche dÃ©jÃ  `pull_request` (types
+      # `opened` / `synchronize`), donc le check existe sur l'arbre fusionnÃ©.
+      # Le `push` en plus ne servait qu'Ã  crÃ©er un deuxiÃ¨me run pour la mÃªme
+      # tÃªte, que la concurrency annulait aussitÃ´t : un `couche0 = cancelled`
+      # de plus sur le SHA du lot, que Mergify peut lire comme un Ã©chec.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "NumÃ©ro de PR Ã  contrÃ´ler"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  # MÃªme doublon que dans `ci.yml` : sur une branche de file, le `push` de
+  # Mergify et la PR ouverte dessus rejouent le mÃªme contrÃ´le sur le mÃªme
+  # arbre. La clÃ© devient la tÃªte pour ces branches, donc le second
+  # dÃ©clenchement annule le premier â€” jamais un saut, qui publierait un check
+  # `skipped` que la file lirait comme un Ã©chec.
+  group: couche0-${{ (startsWith(github.ref_name, 'mergify/merge-queue/') || startsWith(github.event.pull_request.head.ref || '', 'mergify/merge-queue/')) && (github.event.pull_request.head.sha || github.sha) || github.event.pull_request.number || inputs.pr || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  couche0:
+    name: couche0
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: RÃ©cupÃ©rer le garde depuis main, puis contrÃ´ler la PR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          # `merge_group` ne porte pas `pull_request` : le numÃ©ro de PR vit dans
+          # le nom du ref (`refs/heads/gh-readonly-queue/<base>/pr-<n>-<sha>`).
+          REF: ${{ github.event.merge_group.head_ref || github.ref_name }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          # PR de lot crÃ©Ã©e par la file de merge (Mergify) : ce n'est pas une PR
+          # d'auteur, son corps n'a donc pas de `## Scope`, et son arbre est
+          # exactement celui des PR dÃ©jÃ  jugÃ©es une Ã  une avant l'entrÃ©e en
+          # file. La juger ici produirait un faux rouge qui Ã©jecterait le lot.
+          case "${PR_HEAD_REF:-}" in
+            mergify/merge-queue/*)
+              echo "PR de lot de la file de merge : pÃ©rimÃ¨tre dÃ©jÃ  jugÃ© sur chaque PR â€” rien Ã  contrÃ´ler."
+              exit 0
+              ;;
+          esac
+          if [ -z "$PR_NUMBER" ]; then
+            ref="${REF#refs/heads/}"
+            case "$ref" in
+              */pr-*-*)
+                PR_NUMBER="${ref#*pr-}"
+                PR_NUMBER="${PR_NUMBER%%-*}"
+                ;;
+            esac
+          fi
+          if [ -z "$PR_NUMBER" ]; then
+            case "${REF:-$GITHUB_REF_NAME}" in
+              *mergify/merge-queue/*)
+                echo "Branche de lot Mergify : le pÃ©rimÃ¨tre a dÃ©jÃ  Ã©tÃ© jugÃ© sur chaque PR avant son entrÃ©e en file â€” rien de neuf Ã  contrÃ´ler ici."
+                ;;
+              *)
+                echo "::warning::aucun numÃ©ro de PR joignable depuis ce ref (${REF:-$GITHUB_REF_NAME}) â€” rien Ã  juger"
+                ;;
+            esac
+            exit 0
+          fi
+          GARDE="$RUNNER_TEMP/check_couche0.py"
+          recuperer() {
+            curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github.raw" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/contents/.github/couche0/check_couche0.py?ref=$1" \
+              -o "$GARDE"
+          }
+          recuperer main || {
+            echo "::warning::garde absent de main â€” repli sur le head de la PR (premier atterrissage)"
+            recuperer "$HEAD_SHA"
+          }
+          python3 "$GARDE" check --pr "$PR_NUMBER"

@@ -1,0 +1,1224 @@
+# pr-auto-merge â€” file de merge automatique : chaque PR interne est
+# rebasÃ©e sur main si en retard (BEHIND) ou en conflit (DIRTY) ; les PR
+# prÃªtes sont mergÃ©es (rebase) dÃ¨s que les 3 checks requis sont verts.
+# La seule porte reste la CI ; pas de gate humaine.
+# v29 (10/11) : la lecture de `mergeable_state` attend la fin du flapping
+# (~2 min) ouvert par les check-runs du run lui-mÃªme, et `UNSTABLE` rejoint
+# la fenÃªtre de rÃ©essai 10 min (sonde near_probe-autosetup PR #6, gelÃ©e
+# sur 5 lectures transitoires).
+# v4 (2026-10-27) : vrai rebase (pas de bulle de merge) via PAT (secret
+# AUTOMERGE_PAT) â€” GITHUB_TOKEN ne suffit pas (ni auto-merge, ni pushes qui
+# relancent la CI : runs fantÃ´mes Â« action_required Â»). Sans le secret, pause
+# propre au lieu d'Ã©chouer. PoussÃ©e avec bail (lease) : jamais d'Ã©crasement
+# d'un push d'auteur arrivÃ© entre-temps. Forks exclus ; brouillons rebasÃ©s
+# et rÃ©conciliÃ©s mais jamais mergÃ©s.
+# Conflits (v5, 2026-10-28) : l'agent Fireworks tente de les rÃ©soudre
+# (.github/fireworks/conflict_agent.py, modÃ¨le MiniMax M3.1 Flash) : rÃ©solution
+# conflit par conflit, fin du rebase, push avec bail, compte rendu sur la PR.
+# Sans le secret FIREWORKS_API_KEY, on saute comme avant et l'auteur rebase Ã 
+# la main. Coupe-circuit : variable de dÃ©pÃ´t FIREWORKS_AGENT_RESOLVE=0.
+# Conflits brouillons (v6, 2026-10-28) : le sweep traite aussi les brouillons
+# (rebase + agent Fireworks) sans jamais les merger, et les DIRTY comme les
+# BEHIND â€” la CI est la seule voie de rÃ©solution (plus de janitor local).
+# Auth push (v7, 2026-10-28) : PAT dans l'URL (x-access-token) au lieu du
+# helper gh, qui rend 403 Â« denied Â» sur les runners alors que l'API Ã©crit.
+# ParallÃ¨le (v8, 2026-10-28) : matrice â€” un job par PR (8 max), chacun avec
+# son clone. Les runs restent sÃ©rialisÃ©s (groupe concurrency) ; dans un run,
+# rebase + rÃ©solutions + merges avancent en parallÃ¨le. Ã‰checs isolÃ©s
+# (fail-fast: false), pushes toujours avec bail.
+# Latence (v9, 2026-10-28) : le sweep part aussi Ã  chaque fin de CI
+# (`workflow_run` sur `CI`) au lieu d'attendre le cron 10 min (gardÃ© en
+# filet) ; le `sleep 60` devient un sondage bornÃ© 6 Ã— 5 s ; `green()`
+# n'exige plus que `ci`, `ci-budget` et `couche0` (le natif est vÃ©rifiÃ© sur
+# main par `ci-native.yml`, protection rÃ©duite Ã  ces 3 checks).
+# Relance (v10, 2026-10-29) : `BLOCKED` n'est plus Â« rien Ã  faire Â» â€” c'Ã©tait
+# le trou qui laissait une PR d'auteur pourrir indÃ©finiment (PR #215 de GaÃ¯a :
+# `couche0` rouge sur un `## Scope` absent, donc jamais relancÃ©e ni mergÃ©e).
+# DÃ©sormais, pour une PR bloquÃ©e :
+#   - checks `ci` / `ci-budget` tombÃ©s pour de l'infrastructure (job perdu,
+#     checkout, cache, runner) â†’ jobs en Ã©chec relancÃ©s, 2 fois max par tÃªte,
+#     marqueur en commentaire : jamais de boucle ;
+#   - Ã©chec rÃ©el (Ã©tape de tests rouge) â†’ aucune relance inutile, un
+#     commentaire dit quelle Ã©tape est en cause, une fois par tÃªte ;
+#   - `couche0` rouge sur le pÃ©rimÃ¨tre â†’ l'agent de pÃ©rimÃ¨tre
+#     (.github/fireworks/scope_agent.py) rÃ©dige la dÃ©claration manquante depuis
+#     le diff et la vÃ©rifie avec le garde de main AVANT d'Ã©crire le corps
+#     (le garde n'est pas assoupli : fichier non dÃ©clarÃ© et dÃ©claration inutile
+#     restent refusÃ©s) ; l'Ã©dition du corps relance `couche0` ;
+#   - `UNKNOWN` : sondage bornÃ© (4 Ã— 5 s) au lieu de rendre la main aussitÃ´t.
+#   `workflow_run` Ã©coute aussi `couche0` pour enchaÃ®ner sans attendre le cron.
+# FluiditÃ© (v11, 2026-10-29) â€” mesurÃ© sur 153 runs du 29/10 : 96 annulÃ©s (63 %),
+# 92 dÃ©clenchÃ©s par `workflow_run` pour 52 push de PR, et le mÃªme couple
+# (tÃªte, base) balayÃ© 3 fois (CI finie, couche0 fini, cron). Trois coupes :
+#   - plus de dÃ©clencheur `pull_request` large : au push d'une PR, aucun check
+#     n'existe encore, le balayage ne pouvait rien faire (matrice vide, run
+#     brÃ»lÃ©). Reste `ready_for_review` (brouillon â†’ prÃªte : c'est le moment
+#     oÃ¹ on veut merger) ;
+#   - **un seul balayage par couple** (tÃªte de PR, base, Ã©tat de fusion,
+#     empreinte des checks) :
+#     une empreinte dans un commentaire unique, mis Ã  jour sur place (pas un
+#     commentaire par passage). Quand les checks passent, l'Ã©tat change
+#     (BLOCKED â†’ CLEAN) â€” ou qu'un check change de verdict â€” et le balayage
+#     suivant est un vrai travail ;
+#   - cron de filet passÃ© de 10 Ã  15 min, puis revenu Ã  `*/5` (Historique v11) :
+#     `workflow_run` reste la voie rapide, et `ci-budget` a rejoint `ci.yml`,
+#     donc deux dÃ©clencheurs suffisent.
+# File de merge â€” Ã©tat au 29/10 (v15).
+#
+# RÃ´le : chaque PR interne est poussÃ©e vers la fusion sans main humaine. La
+# seule porte reste la CI ; les trois checks requis sont `ci`, `ci-budget` et
+# `couche0`.
+#
+# Deux rÃ©gimes :
+#   1. **File active** (`MERGIFY_QUEUE=1` dans les variables du dÃ©pÃ´t, ou rÃ¨gle
+#      `merge_queue` si un jour le dÃ©pÃ´t en a le droit) : la file met les PR en
+#      file, les met Ã  jour contre `main` et rejoue les checks sur l'arbre
+#      fusionnÃ© du lot. Le balayeur ne merge plus et ne rebase plus ; il ne
+#      garde que ce qu'une file ne sait pas faire â€” conflit (`DIRTY`, rebase +
+#      agent Fireworks), panne d'infrastructure (`BLOCKED`, relance bornÃ©e), et
+#      **branche non linÃ©aire** (v16) : une PR qui a mergÃ© `main` au lieu de
+#      le rebaser n'est pas `BEHIND`, la file la prend puis GitHub refuse son
+#      rebase-merge (`GITHUB_REBASE_MERGE_REFUSED`) ; on la linÃ©arise avant.
+#   2. **Sans file** : ancien chemin complet â€” rebase des PR `BEHIND`, merge
+#      quand les trois checks sont verts, relance des Ã©checs d'infrastructure.
+#
+# Pourquoi la file n'est pas celle de GitHub : elle exige un dÃ©pÃ´t public
+# possÃ©dÃ© par une **organisation** ; celui-ci appartient Ã  un compte
+# utilisateur et l'API refuse la rÃ¨gle `merge_queue` (422). C'est Mergify qui
+# tient la file (`.mergify.yml`, lots de 3). `mergify queue status` et
+# `@mergifyio queue` rÃ©pondent Â« produit Ã  activer Â» tant que le tableau de
+# bord ne l'a pas fait â€” d'oÃ¹ l'interrupteur `MERGIFY_QUEUE`, posÃ© ce jour-lÃ 
+# pour que le balayeur lÃ¢che la main sans redÃ©ploiement.
+#
+# Historique court :
+#   v11 dÃ©duplication par (tÃªte, base, Ã©tat, empreinte des checks) + cron 5 min ;
+#   v12 merge direct des PR `BEHIND` vertes quand le dÃ©pÃ´t l'autorise ;
+#   v13 arrÃªt du rebase collectif (une seule PR prÃ©parÃ©e) â€” le ruleset porte
+#       `strict_required_status_checks_policy: true`, donc chaque merge
+#       invalidait la CI de toutes les autres PR (O(NÂ²), 15 merges/h) ;
+#   v14 cÃ¢blage de la file (merge_group, puis branche de file Mergify) ;
+#   v15 la file prend la main, le balayeur s'efface (`MERGIFY_QUEUE`) ;
+#   v16 `BLOCKED` sur run annulÃ© : le bucket `cancel` n'est pas `fail`
+#       (cas rÃ©el : #434, run CI annulÃ© sans remplaÃ§ant, PR bloquÃ©e Ã 
+#       jamais) â€” le run entier est rejouÃ©, 2 fois max par tÃªte.
+#   v27 (31/10) rÃ©veils : `couche0` ne dÃ©clenche plus le balayage. Il finit
+#       ~9 s aprÃ¨s un push, `CI` ~115 s : son rÃ©veil tombait toujours avant le
+#       verdict et ne pouvait que constater Â« CI en cours Â». MesurÃ© de 20:10 Ã 
+#       22:10 : 41 fins de `couche0` pour 21 runs `CI` â€” la moitiÃ© des
+#       balayages de la fenÃªtre pour rien. Les deux cas qu'il couvrait encore
+#       sont pris ailleurs : un `couche0` rouge arrive par la fin de `CI` de la
+#       mÃªme tÃªte, un `couche0` rÃ©armÃ© seul (bloc `## Scope` rÃ©Ã©crit) arrive
+#       par `pull_request: edited`.
+#   v26 (31/10) couverture des Ã©tats actionnables : le balayage ciblÃ© joint
+#       toujours les PR `DIRTY`/`BLOCKED`/`DRAFT` â€” un run ciblÃ© annulÃ© par une
+#       rafale de concurrency laissait sinon sa tÃªte sans rÃ©veil (#652).
+#   v27 (31/10) relance sans course + verdict lu comme GitHub le lit :
+#       (a) `checks_pr` dÃ©partageait deux runs du mÃªme check par `started_at`,
+#       alors que GitHub rattache un check requis Ã  la **suite la plus rÃ©cente**
+#       (le run le plus rÃ©cent). Quand un `couche0` annulÃ© vivait Ã  cÃ´tÃ© d'un
+#       vert plus ancien, le balayeur croyait la PR verte et ne soignait rien
+#       (#702 : BLOCKED 20 min avec tous ses checks verts). On dÃ©partage donc
+#       par identifiant de run, puis par dÃ©but d'essai.
+#       (b) une relance ne part plus pendant qu'une suite du **mÃªme** workflow
+#       dÃ©marre sur la mÃªme tÃªte : `concurrency` annulait alors la suite
+#       fraÃ®che, et son `cancelled` (run plus rÃ©cent que le vert) devenait le
+#       verdict que GitHub et Mergify lisent â€” PR bloquÃ©e sans aucun rouge,
+#       dÃ©finitivement (#702 : couche0 vert 20:32:26, annulÃ© 20:32:18 sur le
+#       run 41239350675 lancÃ© par l'`edited` de la note d'Ã©tat, que la relance
+#       du run en Ã©chec a tuÃ©).
+#   v25 (31/10) outillage : `test_agent.py` rend **3** quand le runner n'a ni
+#       `zeroclaw` ni sa config â€” sans poser sa marque, donc l'unique tentative
+#       de la tÃªte n'est pas brÃ»lÃ©e (#652 : binaire posÃ© 2 min trop tard).
+#   v23 (31/10) brouillons maintenus : l'Ã©tat `DRAFT` n'Ã©tait traitÃ© nulle
+#       part, donc un brouillon aux tests rouges ne dÃ©clenchait ni relance ni
+#       agent. Il suit dÃ©sormais le chemin `BLOCKED` (jamais mergÃ©, mais
+#       rÃ©parÃ©) et sort de la dÃ©duplication Ã  vie.
+#   v22 (31/10) rÃ©paration des tests : un Ã©chec RÃ‰EL dÃ©clenche l'agent
+#       zeroclaw `fw` (`test_agent.py`) â€” il lit le journal, corrige dans le
+#       clone et le pilote ne pousse qu'un diff bornÃ© qui compile. Une
+#       tentative par tÃªte, coupe-circuit variable `TEST_AGENT=0`. Avant, un
+#       test rouge laissait la PR Ã  une main humaine : c'est ce qui a tuÃ©
+#       #615 pendant deux heures.
+#   v21 (31/10) Ã©tats qui attendent une action : `DIRTY`, `BLOCKED` et
+#       `UNSTABLE` ne se dÃ©dupliquent plus pour toujours â€” la dÃ©duplication v11
+#       les figeait (mÃªme tÃªte, mÃªme base, mÃªmes checks) et une PR dont l'agent
+#       de conflit avait Ã©chouÃ© une fois n'Ã©tait plus jamais reprise (#634).
+#       Nouvelle tentative au plus toutes les 10 min, par PR.
+#   v20 (31/10) Ã©chec attribuable : quand la tÃªte en Ã©chec a Ã©tÃ© poussÃ©e par
+#       l'agent de conflit (`<!-- agent-conflit sha=<tÃªte> -->`), le compte
+#       rendu dit que c'est la **rÃ©solution** qui casse et pose le label
+#       `intervention-humaine`. La porte de compilation de l'agent
+#       (conflict_agent.py v3) rend le cas rare ; ce filet couvre la porte
+#       sautÃ©e (outillage absent, dÃ©lai dÃ©passÃ©).
+#   v17 (31/10) dÃ©bit : le balayeur ne se rÃ©veille plus pour les branches de
+#       lot, ne se rÃ©veille plus sur un run annulÃ©, et ne clone plus que la
+#       PR qui a parlÃ©. Mesure sur 62 min (31/10, 14h â†’ 15h) : 291 runs de ce
+#       workflow, dont ~85 % dÃ©clenchÃ©s par les fins de `CI`/`couche0` des
+#       branches `mergify/merge-queue/**`, Ã  262 s de runner par run (matrice
+#       = toutes les PR ouvertes, un clone de 134 Mo chacune) â€” soit ~85 % du
+#       pool de 21 runners. ConsÃ©quence mesurÃ©e : les checks d'un lot
+#       attendaient 4 min 25 un runner (14:52:47 crÃ©Ã© â†’ 14:57:12 dÃ©marrÃ©), un
+#       lot coÃ»tait ~4,5 min au lieu de ~90 s, et le dÃ©bit plafonnait Ã 
+#       11-19 merges/h. Un run annulÃ© n'apprend rien : un check annulÃ© ne se
+#       relance pas (v16 s'en occupe depuis la PR), donc le balayage est sautÃ©.
+#   v21 (31/10) agent de conflit : il pousse avec le **PAT** (`GH_TOKEN` du
+#       job), plus avec le jeton de l'installation. Un push de
+#       `@github-actions[bot]` ne dÃ©clenche pas les workflows : ils naissent en
+#       `action_required`, aucun check requis n'existe, la PR reste `BLOCKED`
+#       (vÃ©cu sur #634 Ã  16:46 â€” approuvÃ© Ã  la main). Filet indÃ©pendant :
+#       `.github/workflows/auto-approve.yml` approuve tout run `action_required`
+#       du dÃ©pÃ´t toutes les 5 min (jamais un run de fork).
+#   v27 (31/10) agent de pÃ©rimÃ¨tre : mÃªme cause, mÃªme remÃ¨de â€” il Ã©dite le
+#       corps avec le **PAT** (`GH_TOKEN="$GH_ECRITURE"` devant `fw-scope.py`,
+#       comme l'agent de conflit en v21). Sans Ã§a, l'Ã©dition porte l'identitÃ©
+#       `@github-actions[bot]`, GitHub n'Ã©met aucun `pull_request edited`, et
+#       `couche0` ne rejuge jamais le corps corrigÃ© : la PR reste `BLOCKED`
+#       sur un verdict pÃ©rimÃ© alors que le pÃ©rimÃ¨tre est conforme (vÃ©cu sur
+#       #688 : fix Ã©crit Ã  19:00, aucun run `couche0` derriÃ¨re, dÃ©bloquÃ©e Ã  la
+#       main par `gh run rerun`). Filet : quand `couche0` est en Ã©chec et que
+#       la marque scope est dÃ©jÃ  posÃ©e pour la tÃªte (fix Ã©crit, verdict
+#       pÃ©rimÃ©), le run `couche0` en Ã©chec est relancÃ© â€” une fois par tÃªte
+#       (marque `automerge-scope-rerun`) â€” car le garde relit le corps courant
+#       via l'API. Non-rÃ©gression : `InvocationSweepTest` dans
+#       `.github/fireworks/test_scope_agent.py` (la CI le lance dÃ©jÃ ).
+#   v28 (01/11) Ã©chec rÃ©el aprÃ¨s relances : Â« 2 relances dÃ©jÃ  faites, on
+#       s'arrÃªte lÃ  Â» fermait aussi la porte de l'agent fw, et le mot
+#       Â« pÃ©rimÃ¨tre Â» dans la regex d'infra classait l'Ã©tape Â« Tests des
+#       gardes CI (conflits, pÃ©rimÃ¨tre, â€¦) Â» en panne Ã  relancer (vÃ©cu #896 :
+#       KeyError relancÃ© 2 fois, jamais rÃ©parÃ©). La regex ne retient que
+#       l'infra vraie, et un Ã©chec rÃ©el appelle fw mÃªme relances Ã©puisÃ©es
+#       (une tentative par tÃªte, marque propre). Le commentaire d'Ã©chec est
+#       factorisÃ© (`commenter_echec`), les deux branches le partagent.
+
+name: pr-auto-merge
+
+on:
+  # Uniquement les moments oÃ¹ le balayage peut *faire* quelque chose : les
+  # Ã©vÃ©nements `pull_request` larges (opened/synchronize/reopened) arrivaient
+  # avant que le moindre check existe (52 runs/jour pour rien, mesurÃ© le 29/10).
+  # `edited` (v26, 31/10) : une rÃ©Ã©criture de corps de PR â€” le bloc `## Scope`
+  # posÃ© par l'agent de pÃ©rimÃ¨tre â€” rÃ©arme `couche0` seul, sans nouveau `CI`.
+  # C'Ã©tait le seul rÃ©veil que la fin de `couche0` apportait encore ; il est
+  # maintenant pris Ã  la source, sans rÃ©veiller le balayeur pour rien.
+  pull_request:
+    types: [ready_for_review, edited]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_run:
+    # `ci-budget` est un job de `CI` depuis le 29/10 : `CI` couvre les trois
+    # checks requis. `couche0` n'y est PLUS (v26, 31/10) : il finit ~9 s aprÃ¨s
+    # un push quand `CI` met ~115 s, donc son rÃ©veil arrivait toujours avant le
+    # verdict â€” il ne pouvait structurellement rien faire d'autre que constater
+    # Â« CI en cours Â». MesurÃ© de 20:10 Ã  22:10 : 41 fins de `couche0` pour
+    # 21 runs `CI`, soit ~la moitiÃ© des 69 balayages de la fenÃªtre.
+    # Ce qui reste couvert : un `couche0` rouge arrive par la fin de `CI` de la
+    # mÃªme tÃªte (elle est postÃ©rieure, mÃªme sans rapport entre les deux jobs),
+    # et un `couche0` rÃ©armÃ© seul arrive par `pull_request: edited`.
+    workflows: ["CI"]
+    types: [completed]
+
+# Un seul balayage Ã  la fois (v16), sans annulation.
+#
+# v12 avait Ã©clatÃ© le groupe par (Ã©vÃ©nement, tÃªte) pour qu'un run *en attente*
+# ne soit plus annulÃ© par un autre â€” c'Ã©tait juste, mais le remÃ¨de a un coÃ»t
+# devenu visible le 31/10 : chaque fin de `CI` dÃ©clenche un run, chaque run
+# ouvre une matrice de 8 jobs, et les runs se chevauchent. MesurÃ© en pleine
+# journÃ©e de PR : 15 runs `pr-auto-merge` non terminÃ©s contre 10 runs `CI` et
+# 28 runs en file sur un pool de 21 runners â€” le balayage affamait la CI qu'il
+# attend, les `ci-core` passaient de 2 Ã  5 minutes et les lots de la file
+# frÃ´laient leur `checks_timeout` de 20 min.
+#
+# Un groupe unique **sans annulation** rÃ¨gle Ã§a sans perdre de travail : un
+# balayage examine de toute faÃ§on *toutes* les PR ouvertes (`discover` les
+# liste), donc deux runs concurrents font le mÃªme travail ; les sÃ©rialiser ne
+# coÃ»te que l'attente, et l'empreinte v11 fait sortir en quelques secondes un
+# run dont tout a dÃ©jÃ  Ã©tÃ© fait. `cancel-in-progress` reste Ã  `false` : couper
+# un run au milieu d'un rebase ou d'un merge ne gagne rien et peut laisser un
+# push Ã  moitiÃ© fait.
+concurrency:
+  group: pr-auto-merge
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  discover:
+    # v17 â€” filtres de dÃ©clenchement, avant mÃªme de prendre un runner :
+    #   - une branche de lot (`mergify/merge-queue/**`, `gh-readonly-queue/**`)
+    #     est pilotÃ©e par la file, pas par le balayeur : ses fins de `CI` et de
+    #     `couche0` ne doivent rÃ©veiller aucun balayage (c'Ã©tait ~85 % des runs) ;
+    #   - un run `cancelled`/`skipped` ne laisse aucun verdict Ã  traiter.
+    if: ${{ github.event_name != 'workflow_run' || (!startsWith(github.event.workflow_run.head_branch, 'mergify/merge-queue/') && !startsWith(github.event.workflow_run.head_branch, 'gh-readonly-queue/') && github.event.workflow_run.conclusion != 'cancelled' && github.event.workflow_run.conclusion != 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+      strict: ${{ steps.build.outputs.strict }}
+      queue: ${{ steps.build.outputs.queue }}
+    steps:
+      - name: Lister les PR internes ouvertes
+        id: build
+        env:
+          # v18 â€” lectures avec le token de l'installation (quota propre).
+          # Le PAT partage ses 5000 points/h GraphQL avec tous les
+          # agents ; saturÃ©, il faisait tomber `discover` sur
+          # Â« API rate limit already exceeded Â» â†’ Â« liste des PR illisible â€”
+          # file en pause Â» â†’ plus AUCUNE PR n'entrait en file (vÃ©cu le 31/10
+          # de 15:00 Ã  15:25). Les Ã©critures (commentaires, merges, relances,
+          # pushes) gardent le PAT : elles portent son identitÃ©.
+          GH_TOKEN: ${{ github.token }}
+          # Lectures d'administration (protection, rulesets) : REST, quota
+          # `core` du PAT, que le balayage n'entame pas â€” et que le token de
+          # l'installation n'a pas le droit de lire.
+          GH_ECRITURE: ${{ secrets.AUTOMERGE_PAT }}
+          PAT_OK: ${{ secrets.AUTOMERGE_PAT != '' }}
+          EVENT: ${{ github.event_name }}
+          # v17 â€” la tÃªte qui a dÃ©clenchÃ© le balayage (vide hors `workflow_run`).
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          # Interrupteur de la file Mergify. Le ruleset ne peut pas porter la
+          # rÃ¨gle `merge_queue` (dÃ©pÃ´t d'utilisateur, l'API la refuse), donc la
+          # prÃ©sence de la file ne se lit pas dans le ruleset : c'est cette
+          # variable, posÃ©e le jour de l'activation du produit, qui la dit.
+          MERGIFY_QUEUE: ${{ vars.MERGIFY_QUEUE }}
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/bin:/usr/local/bin:/usr/bin:$PATH" # gh + jq : r630 en espace user, runners Dell en systÃ¨me (127 vu 28/10 sur rature-3)
+          if [ "${PAT_OK:-false}" != "true" ]; then
+            echo "AUTOMERGE_PAT absent : file en pause (voir l'en-tÃªte du workflow)"
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENT" = push ]; then
+            # Laisse GitHub recalculer les Ã©tats aprÃ¨s l'atterrissage :
+            # sondage bornÃ© (6 Ã— 5 s max, jamais de sleep fixe > 30 s).
+            # On part dÃ¨s que plus aucune PR n'est en Ã©tat transitoire.
+            for _ in 1 2 3; do
+              inconnus="$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&base=main&per_page=100" \
+                --jq '[.[] | select(.mergeable_state == null or .mergeable_state == "unknown")] | length' \
+                2>/dev/null || echo 1)"
+              if [ "${inconnus:-1}" = "0" ]; then break; fi
+              sleep 5
+            done
+          fi
+          # Le dÃ©pÃ´t exige-t-il une branche Ã  jour avant merge ? La protection
+          # classique et le ruleset peuvent diverger : on lit les deux, le
+          # ruleset gagne (il est actif sur `main`).
+          ghp() { GH_TOKEN="$GH_ECRITURE" gh "$@"; } # lectures REST d'administration
+          STRICT=$( { ghp api "repos/$GITHUB_REPOSITORY/branches/main/protection" \
+              --jq '.required_status_checks.strict' 2>/dev/null || echo false; } )
+          QUEUE=false
+          RULESET=$( { ghp api "repos/$GITHUB_REPOSITORY/rulesets" --jq '.[].id' 2>/dev/null || true; } )
+          for rs in $RULESET; do
+            regles=$(ghp api "repos/$GITHUB_REPOSITORY/rulesets/$rs" 2>/dev/null || true)
+            [ -n "$regles" ] || continue
+            s_rs=$(printf '%s' "$regles" | jq -r '[.rules[]? | select(.type=="required_status_checks")
+                      | .parameters.strict_required_status_checks_policy] | first // false' 2>/dev/null || echo false)
+            q_rs=$(printf '%s' "$regles" | jq -r '[.rules[]? | select(.type=="merge_queue")] | length' 2>/dev/null || echo 0)
+            [ "${s_rs:-false}" = "true" ] && STRICT=true
+            [ "${q_rs:-0}" -gt 0 ] && QUEUE=true
+          done
+          if [ "${MERGIFY_QUEUE:-0}" = "1" ]; then QUEUE=true; fi
+          echo "strict=$STRICT file_de_merge=$QUEUE"
+          printf 'strict=%s\nqueue=%s\n' "$STRICT" "$QUEUE" >> "$GITHUB_OUTPUT"
+          # SÃ©lection (v13) : s'il existe une PR prÃªte (CLEAN, non brouillon),
+          # on inclut tout sauf les BEHIND â€” le merge qui vient dÃ©place `main`,
+          # donc un rebase serait perdu. Sinon on prÃ©pare UNE seule PR `BEHIND`,
+          # la plus ancienne : rebaser toutes les PR Ã  chaque mouvement de
+          # `main`, c'est N CI relancÃ©es dont aucune ne finit avant le
+          # mouvement suivant.
+          # Les commentaires restent HORS du filtre jq : une apostrophe dans un
+          # `--jq 'â€¦'` ferme le guillemet simple et gh meurt sur Â« unknown
+          # arguments Â» (vÃ©cu le 29/10 : `discover` rendait une matrice vide en
+          # silence et plus aucune PR n'Ã©tait balayÃ©e).
+          FILTRE='[.[] | select(.headRepository.nameWithOwner == "GaiaSG94/errata-v2")
+            | {pr: .number, sha: .headRefOid, branch: .headRefName,
+               state: .mergeStateStatus, draft: (.isDraft | tostring),
+               main: .baseRefOid, maj: .updatedAt}]
+            | (map(select(.state == "CLEAN" and .draft == "false"))) as $pretes
+            | if ($pretes | length) > 0
+              then map(select(.state != "BEHIND"))
+              else map(select(.state != "BEHIND"))
+                   + (map(select(.state == "BEHIND")) | sort_by(.maj) | .[0:1])
+              end'
+          # Une liste illisible doit Ãªtre ROUGE, pas vide : une matrice vide
+          # passait pour Â« aucune PR Ã  balayer Â» et la file se taisait.
+          # â”€â”€ inventaire en REST (v19) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          # `gh pr list --json` interroge GraphQL ; le seau REST est distinct et
+          # plus large. Une rÃ©serve : la liste ne calcule pas `mergeable_state`
+          # (null tant que GitHub n'a pas fait le calcul) ; la fiche de la PR,
+          # elle, le rend â€” d'oÃ¹ une lecture par PR, dix au pire.
+          # â”€â”€ attente de stabilisation (v29, 10/11) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          # La crÃ©ation des check-runs du run *lui-mÃªme* sur la tÃªte de la PR
+          # relance le calcul de `mergeable_state` cÃ´tÃ© GitHub : la fiche
+          # flappe (clean/unstable/unknown) pendant ~2 min, et la lecture
+          # one-shot tombait dedans Ã  tous les coups sur les dÃ©pÃ´ts sans
+          # cron ni push (sonde near_probe-autosetup, PR #6 : 5 lectures
+          # UNSTABLE de suite, prouvÃ©es transitoires par sonde externe).
+          # v29 : on relit jusqu'Ã  12 fois Ã  10 s d'intervalle tant que l'Ã©tat
+          # est transitoire (la fenÃªtre de flapping dÃ©passe parfois 45 s â€”
+          # PR #12 sonde : 4 lectures UNSTABLE de suite malgrÃ© l'attente) ;
+          # au-delÃ , verdict tel quel (le rÃ©essai v21 prend le relais au
+          # prochain dÃ©clenchement).
+          lire_fiche() { # $1=numÃ©ro PR â†’ json fiche stabilisÃ©e
+            local n="$1" i fiche etat
+            for i in $(seq 1 12); do
+              fiche="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$n" \
+                2>/dev/null)" || return 1
+              etat="$(printf '%s' "$fiche" | jq -r .mergeable_state \
+                2>/dev/null || echo unknown)"
+              case "$etat" in
+                unknown|unstable)
+                  echo "PR #$n : $etat (lecture $i/12), on attend" >&2
+                  sleep 10 ;;
+                *) printf '%s' "$fiche"; return 0 ;;
+              esac
+            done
+            printf '%s' "$fiche"; return 0
+          }
+          inventaire() {
+            local n
+            gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&base=main&per_page=100" \
+              --jq '.[].number' 2>/dev/null \
+              | while read -r n; do
+                  lire_fiche "$n" | jq '{
+                    number: .number, headRefOid: .head.sha, headRefName: .head.ref,
+                    mergeStateStatus: (if .draft then "DRAFT"
+                      else ({"clean":"CLEAN","dirty":"DIRTY","blocked":"BLOCKED",
+                             "unstable":"UNSTABLE","behind":"BEHIND"}[.mergeable_state] // "UNKNOWN")
+                      end),
+                    isDraft: .draft,
+                    headRepository: {nameWithOwner: (.head.repo.full_name // "")},
+                    baseRefOid: .base.sha, updatedAt: .updated_at }' 2>/dev/null
+                done | jq -s .
+          }
+          if ! MATRIX=$(inventaire | jq -c "$FILTRE"); then
+            echo "::error::liste des PR illisible â€” file en pause (voir le log ci-dessus)"
+            exit 1
+          fi
+          # Un inventaire vide doit Ãªtre VRAI (aucune PR ouverte), pas le
+          # symptÃ´me d'une lecture ratÃ©e : on le vÃ©rifie avant de se taire.
+          if [ "$MATRIX" = "[]" ] && \
+            [ "$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&base=main&per_page=1" --jq 'length' 2>/dev/null || echo 1)" != "0" ]; then
+            echo "::error::inventaire des PR vide alors que des PR sont ouvertes â€” file en pause"
+            exit 1
+          fi
+          [ -n "$MATRIX" ] || MATRIX="[]"
+          # â”€â”€ ciblage v17 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          # Une fin de CI de la PR X ne justifie pas de cloner les 10 autres
+          # PR ouvertes : une matrice de 10 clones de 134 Mo par dÃ©clenchement,
+          # c'est ce qui assÃ©chait le pool. On ne garde donc que la tÃªte qui a
+          # parlÃ©, plus la plus ancienne `BEHIND` (la seule Ã  qui v13 accorde un
+          # rebase). La matrice entiÃ¨re reste pour `push` sur `main` et pour
+          # le cron, qui sont les deux filets de sÃ©curitÃ©.
+          # `unique_by(.pr)` : la tÃªte ciblÃ©e peut aussi Ãªtre la `BEHIND`.
+          # `MATRIX` illisible ou sans tÃªte connue â†’ matrice entiÃ¨re (jamais
+          # moins de travail que nÃ©cessaire, jamais de silence).
+          if [ "${EVENT:-}" = "workflow_run" ] && [ -n "${HEAD_SHA:-}" ] && [ "$MATRIX" != "[]" ]; then
+            # v26 (31/10) â€” le ciblage ne peut pas Ãªtre la seule couverture :
+            # GitHub ne garde qu'UN run en attente par groupe de concurrency, donc
+            # un balayage ciblÃ© peut Ãªtre annulÃ© par une rafale voisine, et la
+            # tÃªte visÃ©e n'a plus aucun Ã©vÃ©nement pour le rÃ©veiller (vÃ©cu sur
+            # #652 : CI finie, run ciblÃ© annulÃ©, plus personne). On joint donc
+            # toujours les PR dans un Ã©tat **actionnable** (DIRTY, BLOCKED,
+            # DRAFT) : peu nombreuses, sans travail inutile (fenÃªtre de 10 min),
+            # et aucune ne peut plus rester orpheline.
+            CIBLE=$(printf '%s' "$MATRIX" | jq -c --arg s "$HEAD_SHA" '
+              [ .[] | select(.sha == $s) ]
+              + [ .[] | select(.state == "DIRTY" or .state == "BLOCKED"
+                               or .state == "DRAFT") ]
+              + ([ .[] | select(.state == "BEHIND") ] | sort_by(.maj) | .[0:1])
+              | unique_by(.pr)' 2>/dev/null || echo "")
+            if [ -n "${CIBLE:-}" ]; then
+              echo "balayage ciblÃ© sur $HEAD_SHA : $(printf '%s' "$MATRIX" | jq 'length') PR â†’ $(printf '%s' "$CIBLE" | jq 'length')"
+              MATRIX="$CIBLE"
+            fi
+          fi
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "$MATRIX" | jq -r '.[] | "PR #\(.pr) \(.state) (maj \(.maj))"'
+
+  sweep:
+    needs: discover
+    if: ${{ needs.discover.outputs.matrix != '[]' && needs.discover.outputs.matrix != '' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Rebase / rÃ©sout / merge la PR ${{ matrix.pr }}
+        env:
+          # v18 â€” mÃªme partage qu'en `discover` : `gh` lit avec le token de
+          # l'installation (quota sÃ©parÃ© du PAT, que tous les agents
+          # Ã©puisent), et n'Ã©crit qu'avec le PAT (`ghe`), parce que
+          # `github-actions[bot]` n'a pas le droit de commander Ã  Mergify.
+          GH_TOKEN: ${{ github.token }}
+          GH_ECRITURE: ${{ secrets.AUTOMERGE_PAT }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+          FIREWORKS_MODEL: ${{ vars.FIREWORKS_MODEL }}
+          # Amont [OI]-compatible (InferHub ici) : sans cette variable, l'agent
+          # de conflit retombe sur l'URL par dÃ©faut et rend 404 avec notre clÃ©.
+          FIREWORKS_BASE_URL: ${{ vars.FIREWORKS_BASE_URL }}
+          FIREWORKS_AGENT_RESOLVE: ${{ vars.FIREWORKS_AGENT_RESOLVE }}
+          FIREWORKS_AGENT_SCOPE: ${{ vars.FIREWORKS_AGENT_SCOPE }}
+          # v22 â€” agent de rÃ©paration des tests (zeroclaw `fw`) : `0` coupe.
+          TEST_AGENT: ${{ vars.TEST_AGENT }}
+          # v28 â€” `0` rend la rÃ©paration d'un test rouge au balayeur (le
+          # workflow `triage-rouge` la prend sinon, avec l'indice du triage).
+          TRIAGE_TEST: ${{ vars.TRIAGE_TEST }}
+          REPO: GaiaSG94/errata-v2
+          PR: ${{ matrix.pr }}
+          SHA: ${{ matrix.sha }}
+          BRANCH: ${{ matrix.branch }}
+          MASTER: ${{ matrix.main }}
+          STATE: ${{ matrix.state }}
+          DRAFT: ${{ matrix.draft }}
+          STRICT: ${{ needs.discover.outputs.strict }}
+          QUEUE: ${{ needs.discover.outputs.queue }}
+        run: |
+          export PATH="$HOME/bin:/usr/local/bin:/usr/bin:$PATH" # gh + jq : r630 en espace user, runners Dell en systÃ¨me (127 vu 28/10 sur rature-3)
+          ghe() { GH_TOKEN="$GH_ECRITURE" gh "$@"; } # Ã©critures : identitÃ© du PAT
+          # â”€â”€ lectures en REST (v19) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          # `gh pr checks` et `gh pr view --json` interrogent GraphQL. Le jeton
+          # de l'installation (v18) a un quota propre, mais REST en a un autre
+          # encore, plus large, et la mÃªme donnÃ©e y est : on la lit lÃ . Le
+          # 31/10, une saturation GraphQL a suffi Ã  rendre le balayeur aveugle
+          # une heure entiÃ¨re.
+          tete() { # $1=pr â†’ sha de la tÃªte (une seule lecture par job)
+            if [ -z "${TETE_PR:-}" ]; then
+              TETE_PR=$(gh api "repos/$REPO/pulls/$1" --jq .head.sha 2>/dev/null || echo "${SHA:-}")
+            fi
+            printf '%s' "$TETE_PR"
+          }
+          checks_pr() { # $1=pr â†’ [{name,state,bucket,link}], mÃªmes clÃ©s que `gh pr checks --json`
+            # Un contexte peut avoir plusieurs runs (relance, annulation) : on
+            # ne garde que le plus rÃ©cent par nom, comme GitHub pour une porte
+            # de fusion â€” sinon un `couche0` annulÃ© Ã  cÃ´tÃ© du vert compte deux
+            # fois et la PR n'est jamais Â« verte Â».
+            # v27 â€” dÃ©partage par **run** (suite) et non par `started_at` :
+            # GitHub attache un check requis Ã  la suite la plus rÃ©cente, donc
+            # un `couche0` annulÃ© par un `edited` reste le verdict mÃªme si un
+            # essai plus ancien, lui, est vert (#702). `started_at` ne sert
+            # plus qu'Ã  dÃ©partager deux essais d'un mÃªme run.
+            gh api "repos/$REPO/commits/$(tete "$1")/check-runs?per_page=100" --jq '
+              [ .check_runs[] | { name: .name, conclusion: .conclusion,
+                                  link: .html_url, debut: .started_at,
+                                  run: ((.html_url // ""
+                                         | capture("/runs/(?<id>[0-9]+)")
+                                         | .id | tonumber) // 0) } ]
+              | sort_by(.name, .run, .debut)
+              | group_by(.name) | map(.[-1])
+              | map({ name: .name,
+                      state: ((.conclusion // "pending") | ascii_upcase),
+                      bucket: (if .conclusion == null then "pending"
+                               elif (.conclusion == "success" or .conclusion == "neutral") then "pass"
+                               elif .conclusion == "skipped" then "skipping"
+                               elif .conclusion == "cancelled" then "cancel"
+                               else "fail" end),
+                      link: .link })' 2>/dev/null
+          }
+          commentaires() { # $1=pr â†’ un corps de commentaire par ligne
+            gh api "repos/$REPO/issues/$1/comments?per_page=100" --jq '.[].body' 2>/dev/null
+          }
+          green() { # 0 si les 3 checks requis de la PR $1 sont SUCCESS
+            checks_pr "$1" | jq -e '
+              ["ci","ci-budget","couche0"] as $req |
+              [ .[] | select(.name as $n | $req | index($n)) ] as $got |
+              ($got | length == 3) and
+              ([$got[] | select(.state == "SUCCESS")] | length == 3)
+            ' >/dev/null
+          }
+          # â”€â”€ Ã©tat d'une PR bloquÃ©e â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          # `BLOCKED` Ã©tait le trou de la v9 : le `case` ne le traitait pas,
+          # donc la PR restait bloquÃ©e pour toujours (cas rÃ©el : #215).
+          echecs_requis() { # noms des checks requis en Ã©chec, sÃ©parÃ©s par une espace
+            checks_pr "$1" \
+              | jq -r '[.[] | select(.bucket=="fail")
+                        | .name | select(.=="ci" or .=="ci-budget" or .=="couche0")]
+                       | join(" ")' || true
+          }
+          annules_requis() { # noms des checks requis annulÃ©s (aucun verdict), sÃ©parÃ©s par une espace
+            checks_pr "$1" \
+              | jq -r '[.[] | select(.bucket=="cancel")
+                        | .name | select(.=="ci" or .=="ci-budget" or .=="couche0")]
+                       | join(" ")' || true
+          }
+          marques() { # $1=pr $2=marque â†’ nb de commentaires qui portent la marque
+            commentaires "$1" | grep -cF -- "$2" || true
+          }
+          commente_une_fois() { # $1=pr $2=marque $3=corps (le corps porte la marque)
+            [ "$(marques "$1" "$2")" -gt 0 ] && return 0
+            ghe pr comment "$1" --body "$3" >/dev/null 2>&1 || true
+            return 0
+          }
+          commits_de_fusion() { # nb de commits de fusion dans une PR (100 commits max lus)
+            gh api "repos/$REPO/pulls/$1/commits?per_page=100" \
+              --jq '[.[] | select((.parents | length) > 1)] | length' 2>/dev/null || echo 0
+          }
+          refus_de_rebase() { # 0 si la file a Ã©jectÃ© la PR faute de pouvoir la rebaser
+            # La file merge en `rebase` ; quand un commit ne se rejoue pas sur
+            # `main` (fichier supprimÃ© d'un cÃ´tÃ©, modifiÃ© de l'autre), GitHub
+            # rÃ©pond Â« Pull request must be rebased manually Â» et la PR sort.
+            # Une branche **linÃ©aire** peut donc Ãªtre refusÃ©e : compter les
+            # commits de fusion ne suffit pas, il faut lire le verdict.
+            gh api "repos/$REPO/issues/$1/comments?per_page=100" \
+              --jq '[.[] | select(.body | contains("Mergify Payload"))] | last | .body // ""' \
+              2>/dev/null | grep -q 'GITHUB_REBASE_MERGE_REFUSED'
+          }
+          commits_non_attribues() { # nb de commits dont l'auteur n'est rattachÃ© Ã  aucun compte
+            gh api "repos/$REPO/pulls/$1/commits?per_page=100" \
+              --jq '[.[] | select(.author == null)] | length' 2>/dev/null || echo 0
+          }
+          etapes_cassees() { # $1=run id â†’ Ã©tapes en Ã©chec (vide = job perdu)
+            gh run view "$1" --json jobs --jq '
+              [.jobs[] | select(.conclusion=="failure")
+               | .steps[] | select(.conclusion=="failure") | .name] | join(" | ")' \
+              2>/dev/null || true
+          }
+          # â”€â”€ empreinte de balayage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          # Les dÃ©clencheurs arrivent par rafales (fin de `CI`, fin de
+          # `couche0`, cron) et refaisaient le mÃªme clone + le mÃªme rebase pour
+          # rien : un couple (tÃªte, base, Ã©tat, empreinte des checks) n'est
+          # balayÃ© qu'une fois.
+          # L'empreinte des checks est nÃ©cessaire : une PR est BLOCKED quand la
+          # CI tourne *et* quand elle a Ã©chouÃ©, or c'est exactement le passage
+          # oÃ¹ il faut relancer. La signature (nom=Ã©tat, triÃ©e) distingue les
+          # deux, et un nouveau verdict change la clÃ©.
+          # Signature illisible â†’ Â« indetermine Â» â†’ jamais de dÃ©duplication.
+          sig="$( { checks_pr "$PR" || true; } \
+            | jq -er '[.[] | "\(.name)=\(.state)"] | sort | join(",")' 2>/dev/null || true )"
+          PF="indetermine"
+          if [ -n "${sig:-}" ]; then
+            PF="$(printf '%s' "$sig" | sha1sum | cut -c1-10)"
+          fi
+          echo "empreinte checks : $PF"
+          ETAT_MARQUE="<!-- automerge-etat -->"
+          deja_balayee() {
+            [ "$PF" = "indetermine" ] && return 1
+            gh api "repos/$REPO/issues/$PR/comments?per_page=100" \
+              --jq '[.[] | select(.body | startswith("<!-- automerge-etat -->"))]
+                    | last | .body // ""' 2>/dev/null \
+              | grep -qF "sha=$SHA main=$MASTER state=$STATE pf=$PF"
+          }
+          noter_etat() { # $1 = ce qui a Ã©tÃ© fait (une ligne)
+            local cid corps
+            cid=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" \
+              --jq '[.[] | select(.body | startswith("<!-- automerge-etat -->"))]
+                    | last | .id // ""' 2>/dev/null || true)
+            corps=$(printf '%s\nsha=%s main=%s state=%s pf=%s ts=%s\n\n%s' \
+              "$ETAT_MARQUE" "$SHA" "$MASTER" "$STATE" "$PF" \
+              "$(date -u +%s)" "$1")
+            if [ -n "${cid:-}" ] && [ "$cid" != "null" ]; then
+              ghe api -X PATCH "repos/$REPO/issues/comments/$cid" \
+                -f body="$corps" >/dev/null 2>&1 || true
+            else
+              ghe pr comment "$PR" --body "$corps" >/dev/null 2>&1 || true
+            fi
+          }
+          age_etat_minutes() { # minutes depuis la derniÃ¨re note d'Ã©tat (999 si aucune)
+            local quand secs
+            quand=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" \
+              --jq '[.[] | select(.body | startswith("<!-- automerge-etat -->"))]
+                    | last | .updated_at // ""' 2>/dev/null || true)
+            [ -n "${quand:-}" ] || { echo 999; return 0; }
+            secs=$(( $(date -u +%s) - $(date -u -d "$quand" +%s) )) || secs=0
+            [ "$secs" -ge 0 ] || secs=0
+            echo $(( secs / 60 ))
+          }
+          # â”€â”€ fusion sans rebase â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          # Une PR `BEHIND` peut Ãªtre mergÃ©e telle quelle : `strict` est Ã 
+          # `false` dans la protection, et `merge --rebase` rebase cÃ´tÃ© serveur.
+          # On ne le fait que si aucun fichier ne croise ce que `main` a pris
+          # depuis la base de la PR : lÃ  oÃ¹ un rebase ne pourrait rien changer
+          # au contenu, il ne sert qu'Ã  relancer la CI (60-90 s par PR).
+          recouvrement_fichiers() { # 0 = recouvrement (ou doute) â†’ rebaser
+            local pr_files master_files n
+            pr_files=$(gh api "repos/$REPO/pulls/$PR/files?per_page=100" --paginate \
+              --jq '.[].filename' 2>/dev/null | sort -u || true)
+            master_files=$(gh api "repos/$REPO/compare/$MASTER...main" \
+              --jq '.files[].filename' 2>/dev/null | sort -u || true)
+            # Liste vide ou tronquÃ©e (l'API plafonne Ã  300 fichiers) : doute.
+            [ -n "$pr_files" ] && [ -n "$master_files" ] || return 0
+            n=$(printf '%s\n' "$master_files" | wc -l)
+            [ "$n" -ge 300 ] && return 0
+            comm -12 <(printf '%s\n' "$pr_files") \
+                      <(printf '%s\n' "$master_files") | grep -q . && return 0
+            return 1
+          }
+          ECHELLE_ETAPES=""
+          # v27 â€” une relance ne doit jamais atterrir pendant qu'une suite du
+          # mÃªme workflow dÃ©marre sur la mÃªme tÃªte : la `concurrency` du
+          # workflow annule alors la suite fraÃ®che, et son `cancelled` â€” run
+          # plus rÃ©cent que le vert â€” devient le verdict lu par GitHub et
+          # Mergify. RÃ©sultat : PR bloquÃ©e pour toujours, sans un seul rouge
+          # (#702, 31/10). On laisse la suite en cours rendre son verdict.
+          suite_en_cours() { # $1=workflow id $2=sha â†’ 0 si une suite tourne dÃ©jÃ 
+            local wf="${1:-}" sha="${2:-}" n
+            [ -n "$wf" ] && [ -n "$sha" ] || return 1
+            [ "$wf" != "0" ] || return 1
+            n=$(gh api "repos/$REPO/actions/runs?head_sha=$sha&per_page=100" \
+                  --jq --argjson wf "$wf" '
+                    [ .workflow_runs[]
+                      | select(.workflow_id == $wf)
+                      | select(.status == "queued" or .status == "in_progress"
+                               or .status == "waiting" or .status == "requested"
+                               or .status == "pending") ] | length' 2>/dev/null || echo 0)
+            [ "${n:-0}" -gt 0 ]
+          }
+          runs_requis_en_echec() { # $1=pr â†’ ids des runs ci/ci-budget en Ã©chec
+            checks_pr "$1" \
+              | jq -r '[.[] | select(.bucket=="fail")
+                         | select(.name=="ci" or .name=="ci-budget") | .link][]
+                       | select(. != null)' \
+              | sed -n 's#.*/runs/\([0-9][0-9]*\).*#\1#p' | sort -u
+          }
+          est_infra() { # $1=Ã©tapes cassÃ©es â†’ 0 si panne d'infrastructure
+            # v28 â€” Â« pÃ©rimÃ¨tre Â» n'est PAS de l'infra : l'Ã©tape Â« Tests des
+            # gardes CI (conflits, pÃ©rimÃ¨tre, couche0, budget) Â» est une Ã©tape
+            # de TESTS (vÃ©cu #896 : KeyError classÃ© infra, 2 relances brÃ»lÃ©es,
+            # agent fw jamais appelÃ©). Infra = setup, checkout, caches, post.
+            [ -z "$1" ] || printf '%s' "$1" |
+              grep -qE 'Set up job|heckout|Setup Gradle|Post |RÃ©cupÃ©rer|cache|chaÃ®ne d.outils'
+          }
+          echec_reel() { # $1=pr â†’ 0 si un run requis porte un Ã©chec rÃ©el
+            local pr="$1" runs run sha_run wf_run etapes
+            runs=$(runs_requis_en_echec "$pr")
+            [ -n "$runs" ] || return 1
+            for run in $runs; do
+              read -r sha_run wf_run <<<"$(gh run view "$run" \
+                --json headSha,workflowDatabaseId \
+                --jq '"\(.headSha) \(.workflowDatabaseId)"' 2>/dev/null || true)" || true
+              [ "$sha_run" = "$SHA" ] || continue
+              suite_en_cours "$wf_run" "$sha_run" && continue
+              etapes=$(etapes_cassees "$run")
+              if ! est_infra "$etapes"; then
+                ECHELLE_ETAPES="$etapes"
+                return 0
+              fi
+            done
+            return 1
+          }
+          relancer() { # $1=pr ; 0 = relancÃ©, 1 = Ã©chec rÃ©el, 2 = rien Ã  relancer
+            local pr="$1" runs run sha_run wf_run etapes rc=2
+            runs=$(runs_requis_en_echec "$pr")
+            [ -n "$runs" ] || return 2
+            for run in $runs; do
+              # Ne jamais relancer un run d'un autre commit : Ã§a ne changerait
+              # pas les checks de cette PR, Ã§a brÃ»lerait juste un runner.
+              read -r sha_run wf_run <<<"$(gh run view "$run" \
+                --json headSha,workflowDatabaseId \
+                --jq '"\(.headSha) \(.workflowDatabaseId)"' 2>/dev/null || true)" || true
+              if [ "$sha_run" != "$SHA" ]; then
+                echo "  run $run : autre commit, pas de relance"
+                continue
+              fi
+              if suite_en_cours "$wf_run" "$sha_run"; then
+                echo "  run $run : suite du mÃªme workflow dÃ©jÃ  en cours sur ${sha_run:0:7}, relance sautÃ©e"
+                continue
+              fi
+              etapes=$(etapes_cassees "$run")
+              # Panne d'infrastructure (runner perdu, checkout, cache) : relancer
+              # est le bon geste. Test rouge : relancer ne prouve rien et brÃ»le
+              # le budget de 5 min par job â€” on le dit, une fois par tÃªte.
+              if est_infra "$etapes"; then
+                if ghe run rerun "$run" --failed >/dev/null 2>&1; then
+                  echo "  run $run relancÃ© (panne d'infrastructure)"
+                  rc=0
+                else
+                  echo "  run $run : relance refusÃ©e"
+                fi
+              else
+                echo "  run $run : Ã©chec rÃ©el dans Â« $etapes Â», pas de relance"
+                ECHELLE_ETAPES="$etapes"
+                rc=1
+              fi
+            done
+            return $rc
+          }
+          relancer_annules() { # $1=pr ; 0 = relancÃ©, 1 = rien Ã  relancer
+            local pr="$1" runs run sha_run wf_run rc=1
+            runs=$(checks_pr "$pr" \
+              | jq -r '[.[] | select(.bucket=="cancel")
+                         | select(.name=="ci" or .name=="ci-budget" or .name=="couche0") | .link][]
+                       | select(. != null)' \
+              | sed -n 's#.*/runs/\([0-9][0-9]*\).*#\1#p' | sort -u)
+            [ -n "$runs" ] || return 1
+            for run in $runs; do
+              # MÃªme garde que relancer() : jamais de relance d'un run
+              # d'un autre commit (remplacÃ©, il ne changerait rien ici).
+              read -r sha_run wf_run <<<"$(gh run view "$run" \
+                --json headSha,workflowDatabaseId \
+                --jq '"\(.headSha) \(.workflowDatabaseId)"' 2>/dev/null || true)" || true
+              if [ "$sha_run" != "$SHA" ]; then
+                echo "  run $run : autre commit, pas de relance"
+                continue
+              fi
+              if suite_en_cours "$wf_run" "$sha_run"; then
+                echo "  run $run : suite du mÃªme workflow dÃ©jÃ  en cours sur ${sha_run:0:7}, relance sautÃ©e"
+                continue
+              fi
+              # Rejeu COMPLET : un job annulÃ© n'est pas un job en Ã©chec,
+              # `--failed` ne relancerait rien.
+              if ghe run rerun "$run" >/dev/null 2>&1; then
+                echo "  run $run relancÃ© (run annulÃ©)"
+                rc=0
+              else
+                echo "  run $run : relance refusÃ©e"
+              fi
+            done
+            return $rc
+          }
+          relancer_couche0() { # $1=pr ; 0 = relancÃ©, 1 = rien Ã  relancer
+            # v27 (31/10) â€” verdict pÃ©rimÃ© : le pÃ©rimÃ¨tre a Ã©tÃ© complÃ©tÃ© mais
+            # `couche0` n'a pas rejouÃ© (Ã©vÃ©nement `edited` perdu). Le garde
+            # relit le corps courant via l'API, donc relancer son run en Ã©chec
+            # suffit â€” mÃªme SHA, verdict frais. MÃªmes gardes que relancer() :
+            # jamais de relance d'un run d'un autre commit.
+            local pr="$1" runs run sha_run wf_run rc=1
+            runs=$(checks_pr "$pr" \
+              | jq -r '[.[] | select(.bucket=="fail")
+                         | select(.name=="couche0") | .link][]
+                       | select(. != null)' \
+              | sed -n 's#.*/runs/\([0-9][0-9]*\).*#\1#p' | sort -u)
+            [ -n "$runs" ] || return 1
+            for run in $runs; do
+              read -r sha_run wf_run <<<"$(gh run view "$run" \
+                --json headSha,workflowDatabaseId \
+                --jq '"\(.headSha) \(.workflowDatabaseId)"' 2>/dev/null || true)" || true
+              if [ "$sha_run" != "$SHA" ]; then
+                echo "  run $run : autre commit, pas de relance"
+                continue
+              fi
+              if suite_en_cours "$wf_run" "$sha_run"; then
+                echo "  run $run : suite du mÃªme workflow dÃ©jÃ  en cours sur ${sha_run:0:7}, relance sautÃ©e"
+                continue
+              fi
+              if ghe run rerun "$run" --failed >/dev/null 2>&1; then
+                echo "  run $run relancÃ© (couche0 pÃ©rimÃ© aprÃ¨s fix de pÃ©rimÃ¨tre)"
+                rc=0
+              else
+                echo "  run $run : relance refusÃ©e"
+              fi
+            done
+            return $rc
+          }
+          commenter_echec() { # $1=pr : dit l'Ã©chec rÃ©el, invoque fw (1 fois/tÃªte)
+            local pr="$1" rc2 corps motif
+            printf -v corps '%s\n' \
+              "<!-- automerge-echec sha=$SHA -->" \
+              "Ã‰chec **rÃ©el** de la CI (Ã©tape Â« ${ECHELLE_ETAPES} Â») : la file ne relance pas un test rouge, Ã§a ne prouverait rien. Il faut un correctif, pas un re-run."
+            # v20 (31/10) â€” cet Ã©chec est-il le nÃ´tre ? Si la tÃªte
+            # courante a Ã©tÃ© poussÃ©e par l'agent de conflit, c'est
+            # sa rÃ©solution qu'il faut relire avant le code de
+            # l'auteur (#615 : rÃ©conciliation non compilable,
+            # classÃ©e Â« Ã©chec rÃ©el Â», PR abandonnÃ©e en silence
+            # jusqu'Ã  une reprise humaine). La porte de
+            # compilation de l'agent est censÃ©e rendre ce cas
+            # impossible : si on le voit ici, elle a Ã©tÃ© sautÃ©e
+            # (outillage absent, dÃ©lai) â€” on le dit et on pose le
+            # label, plutÃ´t que de laisser la PR mourir muette.
+            if commentaires "$pr" | grep -qF "<!-- agent-conflit sha=$SHA -->"; then
+              # printf plutÃ´t qu'une chaÃ®ne multi-ligne : une
+              # ligne non indentÃ©e couperait le bloc `run: |`.
+              printf -v motif '%s\n%s' "$corps" \
+                "La tÃªte \`${SHA:0:7}\` vient de **l'agent de conflit** : c'est la rÃ©solution qui Ã©choue, pas le code de l'auteur. Label \`intervention-humaine\` posÃ© â€” relire la rÃ©conciliation (ou rebaser Ã  la main) avant de relancer."
+              corps="$motif"
+              ghe pr edit "$pr" --add-label intervention-humaine >/dev/null 2>&1 || true
+              echo "PR #$pr : Ã©chec sur une tÃªte de l'agent de conflit, label intervention-humaine"
+            fi
+            # v22 (31/10) â€” un Ã©chec RÃ‰EL dÃ©clenche l'agent de
+            # test zeroclaw `fw` (ordre user) : il lit le journal
+            # du/des run(s) en Ã©chec, corrige dans le clone, et le
+            # pilote (test_agent.py) refuse de pousser ce qui
+            # touche un fichier de garde, dÃ©passe 20 fichiers ou
+            # 1 500 lignes, ou ne compile pas. Une seule tentative
+            # par tÃªte (marque) : jamais de boucle d'agent.
+            # v28 (01/11) â€” la rÃ©paration d'un test rouge appartient au
+            # workflow `triage-rouge` dÃ¨s qu'il est armÃ© (`TRIAGE_TEST` â‰  0) :
+            # il relance la classe tombÃ©e SEULE, en dÃ©duit la dÃ©pendance
+            # d'ordre et dÃ©signe les tests suspects, puis appelle ce mÃªme
+            # pilote **avec cet indice**. VÃ©cu sur #919 : sans indice, deux
+            # saisines Ã  150 s ont rendu Â« budget dÃ©passÃ© Â» et la PR a attendu
+            # une demi-heure pour une ligne Ã  ajouter. `TRIAGE_TEST=0` rend la
+            # main au balayeur, sans rien changer d'autre.
+            if [ "$(marques "$pr" "<!-- test-agent sha=$SHA -->")" -eq 0 ] \
+               && [ "${TEST_AGENT:-1}" != "0" ] \
+               && [ "${TRIAGE_TEST:-1}" = "0" ]; then
+              rc2=0
+              git show origin/main:.github/fireworks/test_agent.py \
+                > /tmp/fw-test-agent.py 2>/dev/null \
+                && python3 /tmp/fw-test-agent.py fix --repo "$REPO" \
+                     --pr "$pr" --branch "$BRANCH" --sha "$SHA" || rc2=$?
+              case "$rc2" in
+                0) printf -v corps '%s\n%s' "$corps" \
+                     "Correctif de l'agent \`fw\` poussÃ© (compilation vÃ©rifiÃ©e) : la CI rejuge." ;;
+                2) echo "PR #$pr : agent de test sans proposition (voir son commentaire)" ;;
+                # v25 (31/10) â€” runner non provisionnÃ© : ce n'est
+                # pas un Ã©chec de l'agent, et il n'a posÃ© aucune
+                # marque. On le dit sans rien promettre ; la tÃªte
+                # garde son essai pour le passage suivant (#652 :
+                # binaire posÃ© 2 min aprÃ¨s l'unique tentative).
+                3) echo "PR #$pr : outillage de l'agent absent sur le runner â€” aucune tentative consommÃ©e, rÃ©essai au prochain passage" ;;
+                *) printf -v corps '%s\n%s' "$corps" \
+                     "L'agent \`fw\` n'a pas pu corriger (voir son commentaire) â€” main humaine." ;;
+              esac
+            fi
+            commente_une_fois "$pr" "<!-- automerge-echec sha=$SHA -->" "$corps"
+          }
+          # â”€â”€ clone Ã  la demande â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          # Le clone ne sert qu'aux chemins qui Ã©crivent sur une branche :
+          # rebase (BEHIND, DIRTY), linÃ©arisation avant la file, agent de
+          # pÃ©rimÃ¨tre. Il est donc **paresseux** : une PR verte qui entre en
+          # file n'en paie pas le coÃ»t.
+          # Auth git : PAT dans l'URL (x-access-token), passÃ©e par commande â€”
+          # rien n'est persistÃ© dans la conf git du runner. Le helper gh
+          # ('!gh auth git-credential') rend 403 sur les runners (vu 28/10).
+          AUTH_URL="https://x-access-token:${GH_ECRITURE}@github.com/${REPO}.git"
+          CLONE_FAIT=""
+          preparer_clone() { # 0 = dÃ©pÃ´t prÃªt, 1 = clone impossible
+            [ -n "$CLONE_FAIT" ] && return 0
+            rm -rf repo
+            git clone --quiet --filter=blob:none "$AUTH_URL" repo || return 1
+            cd repo || return 1
+            # Journal additif : `union` garde les deux entrÃ©es au lieu de lever
+            # un conflit. PosÃ© dans `info/attributes` et pas seulement dans
+            # `.gitattributes` : une branche ancienne ne porte pas encore le
+            # fichier, et c'est justement elle qui conflicte. Sans Ã§a, chaque
+            # mouvement de `main` relanÃ§ait l'agent Fireworks sur CHANGELOG.md
+            # â†’ un push â†’ une CI â†’ un mouvement de `main` (livelock, 29/10).
+            printf 'CHANGELOG.md merge=union\n' >> .git/info/attributes
+            # IdentitÃ© du propriÃ©taire (rÃ¨gle du dÃ©pÃ´t) : un commit poussÃ© par
+            # le balayage doit Ãªtre attribuable, jamais anonyme.
+            git config user.name "GaiaSG94"
+            git config user.email "gsg.corbeille@outlook.fr"
+            export GIT_EDITOR=true
+            CLONE_FAIT=1
+          }
+          rebaser() { # rebase la PR sur main ; l'agent Fireworks rÃ©sout les conflits
+              if git fetch -q "$AUTH_URL" "pull/$PR/head:pr-$PR" 2>/dev/null \
+                && git checkout -q "pr-$PR" 2>/dev/null \
+                && git rebase -q origin/main >/dev/null 2>&1; then
+                if git push -q --force-with-lease="$BRANCH:$SHA" "$AUTH_URL" "HEAD:$BRANCH" 2>&1; then
+                  echo "PR #$PR rebasÃ©e sur main"
+                else
+                  echo "PR #$PR : a bougÃ© entre-temps, prochain passage"
+                fi
+              else
+                # Rebase en conflit : l'agent lit le script sur main (la
+                # branche de la PR peut Ãªtre antÃ©rieure), rÃ©sout, termine
+                # le rebase et pousse lui-mÃªme. 0 = poussÃ©, 1 = Ã©chec avec
+                # compte rendu, 2 = rien Ã  faire : on saute sans bruit.
+                rc=0 # "|| rc=$?" : le step tourne sous bash -e, sans Ã§a
+                # un exit != 0 de l'agent tuerait tout le sweep.
+                # Le PAT dans `GH_TOKEN` : le push de l'agent doit porter
+                # l'identitÃ© du propriÃ©taire, sinon le commit arrive par
+                # `@github-actions[bot]` et les workflows partent en
+                # `action_required` (aucun check requis, PR `BLOCKED` â€” vu sur
+                # #634 le 31/10). `auto-approve.yml` reste le filet.
+                git show origin/main:.github/fireworks/conflict_agent.py \
+                  > /tmp/fw-agent.py 2>/dev/null \
+                  && GH_TOKEN="$GH_ECRITURE" python3 /tmp/fw-agent.py resolve --repo "$REPO" \
+                    --pr "$PR" --branch "$BRANCH" --sha "$SHA" || rc=$?
+                git rebase --abort >/dev/null 2>&1 || true
+                git checkout -q main 2>/dev/null || true
+                case "$rc" in
+                  0) echo "PR #$PR : conflit rÃ©solu par l'agent Fireworks" ;;
+                  *) echo "PR #$PR sautÃ©e (conflit, Ã  l'auteur de rebaser)" ;;
+                esac
+              fi
+          }
+          # RÃ©attribution : un commit dont l'auteur n'est rattachÃ© Ã  aucun compte
+          # GitHub (Â« *@local Â» des agents : freebuff-exec, muse-integrationâ€¦)
+          # dÃ©clenche `require_extra_approval_for_unattributed_changes` du
+          # ruleset â€” une approbation supplÃ©mentaire que personne ne peut
+          # donner quand le propriÃ©taire du dÃ©pÃ´t est lui-mÃªme l'auteur de la
+          # PR. RÃ©sultat : tous les checks verts, PR `BLOCKED` pour toujours
+          # (vÃ©cu le 31/10 sur #576 et #525). On rÃ©Ã©crit l'auteur sur l'identitÃ©
+          # noreply de l'auteur de la PR : le commit reste le sien, il devient
+          # attribuable.
+          reattribuer() { # 0 = rÃ©attribuÃ© et poussÃ©, 1 = Ã©chec
+            local login id noreply
+            login=$(gh api "repos/$REPO/pulls/$PR" --jq .user.login 2>/dev/null || echo "")
+            id=$(gh api "users/$login" --jq .id 2>/dev/null || echo "")
+            [ -n "$login" ] && [ -n "$id" ] || return 1
+            noreply="$id+$login@users.noreply.github.com"
+            git fetch -q "$AUTH_URL" "pull/$PR/head:pr-$PR" 2>/dev/null || return 1
+            git checkout -q "pr-$PR" 2>/dev/null || return 1
+            FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --env-filter "
+              case \"\$GIT_AUTHOR_EMAIL\" in
+                *@local) export GIT_AUTHOR_NAME=\"$login\"; export GIT_AUTHOR_EMAIL=\"$noreply\" ;;
+              esac" origin/main..HEAD >/dev/null 2>&1 || return 1
+            git push -q --force-with-lease="$BRANCH:$SHA" "$AUTH_URL" "HEAD:$BRANCH" 2>&1 || return 1
+          }
+          # â”€â”€ file de merge (Mergify) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          # Quand une file est active, le balayeur ne merge plus et ne rebase
+          # plus : c'est la file qui met en file, qui met Ã  jour la PR contre
+          # `main` et qui rejoue les checks sur l'arbre fusionnÃ© du lot.
+          # Le balayeur garde ce que la file ne sait pas faire : rÃ©soudre un
+          # conflit (DIRTY) et relancer une panne d'infrastructure (BLOCKED).
+          if [ "${QUEUE:-false}" = "true" ]; then
+            case "$STATE" in
+              CLEAN|BEHIND)
+                # La file met Ã  jour la PR contre `main` et teste l'arbre
+                # fusionnÃ© du lot : ni rebase ni merge ici. Il reste Ã  la faire
+                # entrer : `merge_protections_settings.auto_merge_conditions`
+                # dÃ©pend d'un second produit Mergify ; la commande, elle, ne
+                # dÃ©pend de rien (vÃ©rifiÃ© le 29/10 : Â« produit Ã  activer Â» â†’
+                # Â« waiting for queue conditions Â» aprÃ¨s activation).
+                #
+                # LinÃ©aritÃ© d'abord : la file merge en `rebase`, et GitHub
+                # refuse le rebase-merge d'une branche qui porte des commits
+                # de fusion (Â« Pull request must be rebased manually Â»,
+                # GITHUB_REBASE_MERGE_REFUSED). Une branche qui a *mergÃ©*
+                # `main` au lieu de le rebaser n'est pas `BEHIND` â€” sa base
+                # est un ancÃªtre â€” donc rien ne la signalait : la file
+                # l'acceptait, la rejetait au merge, le balayage la remettait.
+                # Boucle sans fin (3 Ã©jections de la PR #525 le 31/10, ~2 min
+                # de CI brÃ»lÃ©es Ã  chaque tour). On linÃ©arise avant la file.
+                FUSIONS="$(commits_de_fusion "$PR")"
+                case "$FUSIONS" in ''|*[!0-9]*) FUSIONS=0 ;; esac
+                # MÃªme traitement pour une branche linÃ©aire que la file vient
+                # d'Ã©jecter parce que GitHub n'arrivait pas Ã  la rebaser : le
+                # refus est le symptÃ´me, le rebase local est le remÃ¨de.
+                REFUS=false
+                if [ "$FUSIONS" -eq 0 ] && refus_de_rebase "$PR"; then REFUS=true; fi
+                if [ "$DRAFT" != "true" ] && { [ "$FUSIONS" -gt 0 ] || [ "$REFUS" = true ]; } \
+                  && [ "$(marques "$PR" "<!-- automerge-linearise sha=$SHA -->")" -eq 0 ]; then
+                  if ! preparer_clone; then
+                    echo "PR #$PR : linÃ©arisation nÃ©cessaire, clone impossible â€” pas de mise en file"
+                    exit 0
+                  fi
+                  printf -v corps '%s\n' \
+                    "<!-- automerge-linearise sha=$SHA -->" \
+                    "Branche non fusionnable telle quelle ($FUSIONS commit(s) de fusion, file refusÃ©e : $REFUS) : rebasÃ©e sur \`main\` et repoussÃ©e, CI relancÃ©e."
+                  gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$corps" >/dev/null 2>&1 || true
+                  echo "PR #$PR : linÃ©arisation avant la file (fusions=$FUSIONS refus=$REFUS)"
+                  rebaser
+                  exit 0
+                fi
+                # Attribution ensuite : un commit d'auteur non rattachÃ© rend la
+                # PR dÃ©finitivement `BLOCKED` malgrÃ© des checks verts (rÃ¨gle
+                # `require_extra_approval_for_unattributed_changes`). On
+                # rÃ©attribue une fois par tÃªte, puis la CI rejoue.
+                NON_ATTRIBUES="$(commits_non_attribues "$PR")"
+                case "$NON_ATTRIBUES" in ''|*[!0-9]*) NON_ATTRIBUES=0 ;; esac
+                if [ "$DRAFT" != "true" ] && [ "$NON_ATTRIBUES" -gt 0 ] \
+                  && [ "$(marques "$PR" "<!-- automerge-attribution sha=$SHA -->")" -eq 0 ]; then
+                  if preparer_clone && reattribuer; then
+                    printf -v corps '%s\n' \
+                      "<!-- automerge-attribution sha=$SHA -->" \
+                      "$NON_ATTRIBUES commit(s) dont l'auteur n'Ã©tait rattachÃ© Ã  aucun compte GitHub : rÃ©attribuÃ©s Ã  l'auteur de la PR (\`$SHA\`), CI relancÃ©e. Sans Ã§a la rÃ¨gle \`require_extra_approval_for_unattributed_changes\` laissait la PR \`BLOCKED\` avec tous ses checks verts."
+                    ghe pr comment "$PR" --body "$corps" >/dev/null 2>&1 || true
+                    echo "PR #$PR : $NON_ATTRIBUES commit(s) rÃ©attribuÃ©s, CI relancÃ©e"
+                  else
+                    echo "PR #$PR : $NON_ATTRIBUES commit(s) non attribuÃ©s, rÃ©attribution impossible"
+                  fi
+                  exit 0
+                fi
+                if [ "$DRAFT" != "true" ] && green "$PR" && ! deja_balayee; then
+                  if ghe pr comment "$PR" --body "@mergifyio queue" >/dev/null 2>&1; then
+                    echo "PR #$PR : mise en file demandÃ©e"
+                    noter_etat "mise en file demandÃ©e (\`@mergifyio queue\`) : le lot est testÃ© sur l'arbre fusionnÃ©."
+                  else
+                    echo "PR #$PR : commande de file refusÃ©e"
+                  fi
+                else
+                  echo "PR #$PR : $STATE â€” file de merge, rien Ã  faire ici"
+                fi
+                exit 0
+                ;;
+            esac
+          fi
+          # v21 (31/10) â€” la dÃ©duplication v11 ne doit pas figer un Ã©tat qui
+          # *attend une action*. VÃ©cu : une PR `DIRTY` dont l'agent de conflit a
+          # Ã©chouÃ© une fois (quota, modÃ¨le, porte de compilation) garde le mÃªme
+          # couple (tÃªte, base, Ã©tat, empreinte de checks) â€” donc le balayage la
+          # croyait Â« dÃ©jÃ  faite Â» Ã  chaque passage et ne la reprenait JAMAIS
+          # (#634 le 31/10, et #615 avant qu'un humain ne s'en mÃªle). MÃªme
+          # chose pour `BLOCKED`, dont les relances sont bornÃ©es par marqueur :
+          # sans cette fenÃªtre, une PR dont la porte a refusÃ© le push restait
+          # morte jusqu'Ã  un mouvement de `main`.
+          # On reprend donc `DIRTY` et `BLOCKED` au plus toutes les 10 min par
+          # PR : assez pour ne pas cloner 134 Mo Ã  chaque rÃ©veil du balayeur,
+          # assez court pour qu'une PR ne pourrisse pas une demi-journÃ©e.
+          # v29 : `UNSTABLE` rejoint le rÃ©essai â€” la lecture one-shot tombe
+          # dans la fenÃªtre de flapping ouverte par les check-runs du run
+          # lui-mÃªme (sonde near_probe-autosetup, PR #6) ; sans rÃ©essai, un
+          # premier verdict transitoire figeait la PR jusqu'Ã  nouvel ordre.
+          if deja_balayee; then
+            case "$STATE" in
+              DIRTY|BLOCKED|DRAFT|UNSTABLE)
+                age="$(age_etat_minutes)"
+                if [ "${age:-999}" -lt 10 ]; then
+                  echo "PR #$PR : $STATE, derniÃ¨re tentative il y a ${age} min (< 10), on attend"
+                  exit 0
+                fi
+                echo "PR #$PR : $STATE depuis ${age} min â€” nouvelle tentative"
+                ;;
+              *)
+                echo "PR #$PR : balayÃ©e pour ${SHA:0:7} sur ${MASTER:0:7} en Ã©tat $STATE (rien de neuf)"
+                exit 0
+                ;;
+            esac
+          fi
+          # â”€â”€ chemin rapide : en retard sur la base, vert, fichiers disjoints â”€â”€
+          # Aucun clone : c'est ce cas qui fait le dÃ©bit. Chaque merge dÃ©place
+          # `main`, donc *toutes* les autres PR passent `BEHIND` ; les
+          # rebaser une par une relanÃ§ait leur CI et re-dÃ©plaÃ§ait `main`
+          # (O(NÂ²)). Ici on fusionne, point.
+          if [ "${STRICT:-true}" != "true" ] && [ "$STATE" = "BEHIND" ] \
+            && [ "$DRAFT" != "true" ] && green "$PR" && ! recouvrement_fichiers; then
+            if err=$(ghe pr merge --rebase --match-head-commit "$SHA" "$PR" 2>&1); then
+              echo "PR #$PR mergÃ©e sans rebase (base en retard, fichiers disjoints)"
+              noter_etat "mergÃ©e sans rebase : base en retard, fichiers disjoints, CI relancÃ©e pour rien Ã©vitÃ©e."
+              exit 0
+            fi
+            echo "PR #$PR : merge direct refusÃ© ($(printf '%s' "$err" | tail -1 | cut -c1-160)), on rebase"
+          fi
+          preparer_clone || { echo "clone impossible, rien Ã  faire"; exit 0; }
+          case "$STATE" in
+            DIRTY) rebaser ;;
+            # `BEHIND` : le chemin rapide a dÃ©jÃ  dit non (fichiers qui se
+            # croisent, brouillon, ou checks pas verts) â†’ rebase classique.
+            BEHIND) rebaser ;;
+            CLEAN)
+              if [ "$DRAFT" = "true" ]; then
+                echo "PR #$PR : brouillon Ã  jour, pas de merge"
+              elif green "$PR"; then
+                if ghe pr merge --rebase --match-head-commit "$SHA" "$PR" >/dev/null 2>&1; then
+                  echo "PR #$PR mergÃ©e"
+                else
+                  echo "PR #$PR : merge refusÃ© (base bougÃ©e ?), prochain passage"
+                fi
+              else
+                echo "PR #$PR : CI pas encore verte"
+              fi
+              ;;
+            BLOCKED|DRAFT)
+              # v23 (31/10) â€” un brouillon ne se merge jamais, mais il se
+              # **maintient** : la v6 le rebasait dÃ©jÃ , or l'Ã©tat `DRAFT` n'Ã©tait
+              # traitÃ© nulle part dans cette machine, donc un brouillon aux
+              # tests rouges ne dÃ©clenchait rien (vÃ©cu sur #652 : l'agent de test
+              # n'a jamais Ã©tÃ© appelÃ©). MÃªme chemin que `BLOCKED` : relance
+              # bornÃ©e des runs annulÃ©s, agent de pÃ©rimÃ¨tre, agent de test.
+              # Trou v15 (cas rÃ©el : #434) : un run ANNULÃ‰ (runner perdu,
+              # annulation manuelle) n'a aucun verdict â€” bucket `cancel`,
+              # pas `fail` â€” donc `echecs_requis` le manquait et la PR
+              # restait bloquÃ©e Ã  jamais. Un run annulÃ© se rejoue, il ne se
+              # juge pas : pas d'agent de pÃ©rimÃ¨tre ici, mÃªme si c'est
+              # `couche0` qui est annulÃ©.
+              annules="$(annules_requis "$PR")"
+              if [ -n "${annules:-}" ]; then
+                n="$(marques "$PR" "<!-- automerge-recancel sha=$SHA -->")"
+                n="${n:-0}"
+                if [ "$n" -lt 2 ]; then
+                  if relancer_annules "$PR"; then
+                    printf -v corps '%s\n' \
+                      "<!-- automerge-recancel sha=$SHA -->" \
+                      "Relance automatique ($((n + 1))/2) du run annulÃ© sur \`${SHA:0:7}\` â€” aucun verdict Ã  juger, on rejoue le run entier."
+                    ghe pr comment "$PR" --body "$corps" >/dev/null 2>&1 || true
+                  else
+                    echo "PR #$PR : run annulÃ© d'un autre commit, pas de relance"
+                  fi
+                else
+                  echo "PR #$PR : 2 relances d'annulation dÃ©jÃ  faites pour ce SHA, on s'arrÃªte lÃ "
+                fi
+              fi
+              echecs="$(echecs_requis "$PR")"
+              if [ -z "${echecs:-}" ]; then
+                echo "PR #$PR : BLOCKED sans check requis en Ã©chec (revue demandÃ©e ?), rien Ã  faire"
+              else
+                echo "PR #$PR : BLOCKED â€” check(s) requis en Ã©chec : $echecs"
+                case " $echecs " in
+                  *" couche0 "*)
+                    # PÃ©rimÃ¨tre : une seule tentative par tÃªte de PR.
+                    if [ "$(marques "$PR" "<!-- automerge-scope sha=$SHA -->")" -eq 0 ]; then
+                      rc=0
+                      # Le PAT dans `GH_TOKEN` (v27) : l'Ã©dition du corps doit
+                      # porter l'identitÃ© du propriÃ©taire, sinon GitHub n'Ã©met
+                      # aucun `pull_request edited` et `couche0` ne rejuge jamais
+                      # (mÃªme cause que l'agent de conflit en v21 â€” vÃ©cu sur
+                      # #688 : fix Ã©crit, aucun run derriÃ¨re, PR BLOCKED sur un
+                      # verdict pÃ©rimÃ©).
+                      git show origin/main:.github/fireworks/scope_agent.py \
+                        > /tmp/fw-scope.py 2>/dev/null \
+                        && git show origin/main:.github/couche0/check_couche0.py \
+                          > /tmp/couche0.py 2>/dev/null \
+                        && GH_TOKEN="$GH_ECRITURE" python3 /tmp/fw-scope.py fix --repo "$REPO" --pr "$PR" \
+                          --sha "$SHA" --guard /tmp/couche0.py || rc=$?
+                      case "$rc" in
+                        0) echo "PR #$PR : pÃ©rimÃ¨tre complÃ©tÃ©, couche0 va rejuger" ;;
+                        2) echo "PR #$PR : pÃ©rimÃ¨tre laissÃ© tel quel (rien de rÃ©parable ou dÃ©jÃ  tentÃ©)" ;;
+                        *) echo "PR #$PR : pÃ©rimÃ¨tre non complÃ©tÃ© (code $rc)" ;;
+                      esac
+                    else
+                      echo "PR #$PR : pÃ©rimÃ¨tre dÃ©jÃ  traitÃ© pour ce SHA, pas de boucle"
+                      # v27 â€” filet verdict pÃ©rimÃ© : le fix est Ã©crit (marque
+                      # scope posÃ©e) mais `couche0` est toujours en Ã©chec sur
+                      # cette tÃªte, donc son run n'a pas rejouÃ©. Une relance,
+                      # une fois par tÃªte : le garde relit le corps courant.
+                      if [ "$(marques "$PR" "<!-- automerge-scope-rerun sha=$SHA -->")" -eq 0 ]; then
+                        if relancer_couche0 "$PR"; then
+                          printf -v corps '%s\n' \
+                            "<!-- automerge-scope-rerun sha=$SHA -->" \
+                            "Run \`couche0\` relancÃ© sur \`${SHA:0:7}\` : le pÃ©rimÃ¨tre avait Ã©tÃ© complÃ©tÃ© mais le verdict n'avait pas rejouÃ© (Ã©vÃ©nement perdu). Le garde relit le corps courant, aucun nouveau commit."
+                          ghe pr comment "$PR" --body "$corps" >/dev/null 2>&1 || true
+                        fi
+                      fi
+                    fi
+                    ;;
+                esac
+                case " $echecs " in
+                  *" ci "*|*" ci-budget "*)
+                    n="$(marques "$PR" "<!-- automerge-retry sha=$SHA -->")"
+                    n="${n:-0}"
+                    if [ "$n" -lt 2 ]; then
+                      rc=0
+                      relancer "$PR" || rc=$?
+                      case "$rc" in
+                        0)
+                          printf -v corps '%s\n' \
+                            "<!-- automerge-retry sha=$SHA -->" \
+                            "Relance automatique ($((n + 1))/2) des checks requis en Ã©chec sur \`${SHA:0:7}\` â€” redÃ©marrage des jobs, aucun nouveau commit."
+                          ghe pr comment "$PR" --body "$corps" >/dev/null 2>&1 || true
+                          ;;
+                        1)
+                          commenter_echec "$PR"
+                          ;;
+                        *)
+                          echo "PR #$PR : rien Ã  relancer (run d'un autre commit ?)"
+                          ;;
+                      esac
+                    # v28 â€” relances Ã©puisÃ©es n'est pas Â« rÃ©parÃ© Â» : si l'Ã©chec
+                    # est RÃ‰EL, l'agent fw garde son unique tentative par tÃªte
+                    # (marque propre, pas de boucle). VÃ©cu #896 : Ã©tape Â« Tests
+                    # des gardes CI (conflits, pÃ©rimÃ¨tre, â€¦) Â» classÃ©e infra Ã 
+                    # tort, 2 relances brÃ»lÃ©es, puis Â« on s'arrÃªte lÃ  Â» sans
+                    # jamais appeler l'agent.
+                    elif echec_reel "$PR"; then
+                      commenter_echec "$PR"
+                    else
+                      echo "PR #$PR : 2 relances dÃ©jÃ  faites pour ce SHA, on s'arrÃªte lÃ "
+                    fi
+                    ;;
+                esac
+              fi
+              ;;
+            UNKNOWN)
+              # GitHub recalcule souvent en quelques secondes : sondage bornÃ©.
+              st="$STATE"
+              for _ in 1 2; do
+                sleep 5
+                st="$(gh api "repos/$REPO/pulls/$PR" --jq '(if .draft then "DRAFT" else ({"clean":"CLEAN","dirty":"DIRTY","blocked":"BLOCKED","unstable":"UNSTABLE","behind":"BEHIND"}[.mergeable_state] // "UNKNOWN") end)' 2>/dev/null || echo UNKNOWN)"
+                if [ "${st:-UNKNOWN}" != "UNKNOWN" ]; then break; fi
+              done
+              echo "PR #$PR : Ã©tat $st aprÃ¨s sondage, prochain passage"
+              ;;
+            *) echo "PR #$PR : Ã©tat $STATE, rien Ã  faire" ;;
+          esac
+          noter_etat "Ã©tat \`$STATE\` Â· tÃªte \`${SHA:0:7}\` Â· base \`${MASTER:0:7}\` â€” balayÃ©e, prochain passage au prochain changement." 

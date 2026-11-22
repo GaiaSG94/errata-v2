@@ -1,0 +1,15 @@
+{
+  "source": "corpus/demo/copie-demo-4.jpg",
+  "modele": "ag/gemini-4-carbon",
+  "enregistreLe": "2026-11-15T12:47:08.005Z",
+  "dominant": "propre",
+  "nbFautes": 0,
+  "revues": 0,
+  "durees": {
+    "extrait": 59394,
+    "classifie": 0
+  },
+  "reponses": {
+    "analyse": "{\"annotations\":[],\"copiePropre\":true}"
+  }
+}
